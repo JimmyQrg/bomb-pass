@@ -140,6 +140,17 @@ function generateMap(){
   }
 }
 
+function findFreeTile() {
+  for(let y=1;y<mapHeight-1;y++){
+    for(let x=1;x<mapWidth-1;x++){
+      if(map[y][x]==="ground"){
+        return {x:x*tileSize, y:y*tileSize};
+      }
+    }
+  }
+  return {x:tileSize, y:tileSize};
+}
+
 function startGame(){
   document.getElementById("settingsMenu").style.display="none";
   canvas.style.display="block";
@@ -147,9 +158,14 @@ function startGame(){
   generateMap();
   players=[];
   for(let i=0;i<totalPlayers;i++){
+    let spawn = {x:tileSize*(2+i*3), y:tileSize*2};
+    // Check wall
+    if(!canMove(spawn.x, spawn.y, 28, 28)){
+      spawn = findFreeTile();
+    }
     players.push({
-      x:tileSize*(2+i*3),
-      y:tileSize*2,
+      x:spawn.x,
+      y:spawn.y,
       w:28, h:28,
       color:`hsl(${i*90},80%,60%)`,
       alive:true, hasBomb:false,
@@ -245,7 +261,7 @@ function updateGame(){
     ctx.fillStyle=p.color;
     ctx.fillRect(p.x,p.y,p.w,p.h);
 
-    // Bomb throw
+    // Bomb throw: transfer if another player is close
     if(p.hasBomb && keys[p.ctrl.throw]){
       players.forEach((target,j)=>{
         if(i!==j && target.alive &&
