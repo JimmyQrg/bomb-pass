@@ -5,17 +5,15 @@
 <title>Bomb Pass</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
-  body { margin:0; background:black; display:flex; justify-content:center; align-items:center; height:100vh; }
-  canvas { image-rendering: pixelated; background:#000; }
-  #menu, #settings, #gameover {
-    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-    display:none; flex-direction:column; align-items:center;
-    font-family:'Press Start 2P', monospace; background:url("images/background.png") center/cover no-repeat;
-    padding:20px; border:4px solid #444;
-  }
-  #menu button, #settings button {
-    background:none; border:none; margin:10px; cursor:pointer;
-  }
+body { margin:0; background:black; display:flex; justify-content:center; align-items:center; height:100vh; }
+canvas { image-rendering: pixelated; background:#000; }
+#menu, #settings, #gameover {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  display:none; flex-direction:column; align-items:center;
+  font-family:'Press Start 2P', monospace; background:url("images/background.png") center/cover no-repeat;
+  padding:20px; border:4px solid #444;
+}
+#menu button, #settings button { background:none; border:none; margin:10px; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -41,10 +39,7 @@
 const canvas=document.getElementById("gameCanvas");
 const ctx=canvas.getContext("2d");
 
-let mapSize=40; // bigger map
-let grid=[], players=[], bomb=null, gameRunning=false, timeLeft=0, startTime=20, numPlayers=2;
-
-// Camera
+let mapSize=40, grid=[], players=[], bomb=null, explosions=[], gameRunning=false, timeLeft=0, startTime=20, numPlayers=2;
 let camX=0, camY=0, camZoom=1;
 
 // Resize canvas
@@ -59,13 +54,14 @@ resizeCanvas();
 const wallImg=new Image(); wallImg.src="images/blocks/wall.png";
 const groundImg=new Image(); groundImg.src="images/blocks/ground-slab.png";
 const bombImg=new Image(); bombImg.src="images/bomb.png";
+const explosionImg=new Image(); explosionImg.src="images/bomb.png"; // can use bomb.png as placeholder
 let playerImgs={};
 for(let i=1;i<=4;i++){
   playerImgs[i]=new Image(); playerImgs[i].src=`images/players/player-${i}.png`;
   playerImgs[i+"b"]=new Image(); playerImgs[i+"b"].src=`images/players/player-${i}-bomb.png`;
 }
 
-// Key binds
+// Controls
 const controls=[
   {up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD',throw:'KeyQ'},
   {up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',throw:'Slash'},
@@ -74,15 +70,14 @@ const controls=[
 ];
 let keys={};
 
-// Map generator
+// Map generation
 function generateMap(){
   grid=[];
   for(let y=0;y<mapSize;y++){
     let row=[];
     for(let x=0;x<mapSize;x++){
-      if(x===0||y===0||x===mapSize-1||y===mapSize-1||Math.random()<0.15){
-        row.push(1); // wall
-      }else row.push(0); // ground
+      if(x===0||y===0||x===mapSize-1||y===mapSize-1||Math.random()<0.15) row.push(1);
+      else row.push(0);
     }
     grid.push(row);
   }
@@ -96,7 +91,7 @@ function spawnPlayers(){
     do{
       x=Math.floor(Math.random()*mapSize);
       y=Math.floor(Math.random()*mapSize);
-    }while(grid[y][x]===1 || players.some(p=>p.x===x&&p.y===y));
+    }while(grid[y][x]===1 || players.some(p=>p.x===x && p.y===y));
     players.push({id:i+1,x,y,alive:true,hasBomb:false});
   }
 }
@@ -106,10 +101,10 @@ function giveBomb(){
   let alive=players.filter(p=>p.alive);
   let pick=alive[Math.floor(Math.random()*alive.length)];
   pick.hasBomb=true;
-  bomb={x:pick.x,y:pick.y,dir:null,holder:pick};
+  bomb={x:pick.x,y:pick.y,dir:null,holder:pick,explodeTimer:startTime};
 }
 
-// Collision check
+// Collision
 function isBlocked(x,y){
   if(x<0||y<0||x>=mapSize||y>=mapSize) return true;
   if(grid[y][x]===1) return true;
@@ -117,14 +112,22 @@ function isBlocked(x,y){
   return false;
 }
 
-// Smooth interpolation
 function lerp(a,b,t){ return a + (b-a)*t; }
+
+// Explosion
+function explode(x,y){
+  explosions.push({x,y,frame:0});
+  // check hit players
+  players.forEach(p=>{
+    if(p.alive && p.x===x && p.y===y){ p.alive=false; if(bomb && bomb.holder===p) bomb=null;}
+  });
+}
 
 // Game loop
 function update(){
   if(!gameRunning) return;
 
-  // --- Movement ---
+  // Movement
   players.forEach((p,i)=>{
     if(!p.alive) return;
     let ctrl=controls[i];
@@ -139,7 +142,7 @@ function update(){
     }
   });
 
-  // --- Throw ---
+  // Throw
   players.forEach((p,i)=>{
     if(!p.alive) return;
     if(bomb && bomb.holder===p){
@@ -159,48 +162,42 @@ function update(){
     }
   });
 
-  // --- Bomb travel ---
+  // Bomb travel
   if(bomb && !bomb.holder && bomb.dir){
     let nx=bomb.x+bomb.dir.x, ny=bomb.y+bomb.dir.y;
     if(nx<0||ny<0||nx>=mapSize||ny>=mapSize || grid[ny][nx]===1){
       bomb.dir=null;
     }else{
       let hit=players.find(pl=>pl.alive && pl.x===nx && pl.y===ny);
-      if(hit){
-        hit.hasBomb=true; bomb.holder=hit; bomb.dir=null;
-      }else{
-        bomb.x=nx; bomb.y=ny;
-      }
+      if(hit){ hit.hasBomb=true; bomb.holder=hit; bomb.dir=null; }
+      else { bomb.x=nx; bomb.y=ny; }
     }
   }
 
-  // --- Timer ---
-  timeLeft-=(1/60);
-  if(timeLeft<=0){
-    if(bomb){
-      if(bomb.holder){ bomb.holder.alive=false; }
-      bomb=null;
-    }
-    let alive=players.filter(p=>p.alive);
-    if(alive.length<=1){
-      gameRunning=false;
-      document.getElementById("winnerText").textContent=alive.length?`Player ${alive[0].id} Wins!`:"No one wins";
-      document.getElementById("gameover").style.display="flex";
-    }else{
-      timeLeft=startTime; giveBomb();
-    }
+  // Bomb timer
+  if(bomb){ bomb.explodeTimer-=(1/60); if(bomb.explodeTimer<=0){ explode(bomb.x,bomb.y); bomb=null; } }
+
+  // Update explosions
+  explosions.forEach(e=>e.frame++);
+  explosions = explosions.filter(e=>e.frame<15);
+
+  // Timer and check alive
+  let alive=players.filter(p=>p.alive);
+  if(alive.length<=1 && !bomb){
+    gameRunning=false;
+    document.getElementById("winnerText").textContent=alive.length?`Player ${alive[0].id} Wins!`:"No one wins";
+    document.getElementById("gameover").style.display="flex";
   }
 
-  // --- Camera ---
-  let alivePlayers=players.filter(p=>p.alive);
-  if(alivePlayers.length>0){
-    let minX=Math.min(...alivePlayers.map(p=>p.x));
-    let maxX=Math.max(...alivePlayers.map(p=>p.x));
-    let minY=Math.min(...alivePlayers.map(p=>p.y));
-    let maxY=Math.max(...alivePlayers.map(p=>p.y));
+  // Camera
+  if(alive.length>0){
+    let minX=Math.min(...alive.map(p=>p.x));
+    let maxX=Math.max(...alive.map(p=>p.x));
+    let minY=Math.min(...alive.map(p=>p.y));
+    let maxY=Math.max(...alive.map(p=>p.y));
     let boxWidth=maxX-minX+1, boxHeight=maxY-minY+1;
 
-    let baseTile = canvas.width/mapSize; // max zoom-in
+    let baseTile = canvas.width/mapSize;
     let fitTileX = canvas.width/boxWidth;
     let fitTileY = canvas.height/boxHeight;
     let targetZoom = Math.min(fitTileX, fitTileY);
@@ -209,43 +206,50 @@ function update(){
     let centerX=(minX+maxX+1)/2;
     let centerY=(minY+maxY+1)/2;
 
-    // Smooth zoom & pan
     camZoom=lerp(camZoom,targetZoom,0.1);
     camX=lerp(camX,centerX-(canvas.width/(2*camZoom)),0.1);
     camY=lerp(camY,centerY-(canvas.height/(2*camZoom)),0.1);
-
-    // --- Draw ---
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    for(let y=0;y<mapSize;y++){
-      for(let x=0;x<mapSize;x++){
-        let dx=(x-camX)*camZoom;
-        let dy=(y-camY)*camZoom;
-        if(dx+camZoom<0||dy+camZoom<0||dx>canvas.width||dy>canvas.height) continue;
-        ctx.drawImage(grid[y][x]===1?wallImg:groundImg,dx,dy,camZoom,camZoom);
-      }
-    }
-    players.forEach(p=>{
-      if(p.alive){
-        let img=p.hasBomb?playerImgs[p.id+"b"]:playerImgs[p.id];
-        let dx=(p.x-camX)*camZoom;
-        let dy=(p.y-camY)*camZoom;
-        ctx.drawImage(img,dx,dy,camZoom,camZoom);
-      }
-    });
-    if(bomb && !bomb.holder){
-      let dx=(bomb.x-camX)*camZoom;
-      let dy=(bomb.y-camY)*camZoom;
-      ctx.drawImage(bombImg,dx,dy,camZoom,camZoom);
-    }
-    ctx.fillStyle="white"; 
-    ctx.font=`${canvas.width/20}px 'Press Start 2P'`;
-    ctx.fillText(Math.ceil(timeLeft),10,30);
   }
+
+  // Draw
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let y=0;y<mapSize;y++){
+    for(let x=0;x<mapSize;x++){
+      let dx=(x-camX)*camZoom;
+      let dy=(y-camY)*camZoom;
+      if(dx+camZoom<0||dy+camZoom<0||dx>canvas.width||dy>canvas.height) continue;
+      ctx.drawImage(grid[y][x]===1?wallImg:groundImg,dx,dy,camZoom,camZoom);
+    }
+  }
+  players.forEach(p=>{
+    if(p.alive){
+      let img=p.hasBomb?playerImgs[p.id+"b"]:playerImgs[p.id];
+      let dx=(p.x-camX)*camZoom;
+      let dy=(p.y-camY)*camZoom;
+      ctx.drawImage(img,dx,dy,camZoom,camZoom);
+    }
+  });
+  if(bomb && !bomb.holder){
+    let dx=(bomb.x-camX)*camZoom;
+    let dy=(bomb.y-camY)*camZoom;
+    ctx.drawImage(bombImg,dx,dy,camZoom,camZoom);
+  }
+  explosions.forEach(e=>{
+    let dx=(e.x-camX)*camZoom;
+    let dy=(e.y-camY)*camZoom;
+    ctx.fillStyle="orange";
+    ctx.fillRect(dx,dy,camZoom,camZoom);
+  });
+
+  // Timer
+  ctx.fillStyle="white"; 
+  ctx.font=`${canvas.width/20}px 'Press Start 2P'`;
+  ctx.fillText(Math.ceil(timeLeft),10,30);
 
   requestAnimationFrame(update);
 }
 
-// --- UI ---
+// UI
 document.getElementById("menu").style.display="flex";
 document.getElementById("btn2").onclick=()=>{numPlayers=2;document.getElementById("menu").style.display="none";document.getElementById("settings").style.display="flex";};
 document.getElementById("btn3").onclick=()=>{numPlayers=3;document.getElementById("menu").style.display="none";document.getElementById("settings").style.display="flex";};
