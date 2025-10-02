@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bomb Pass</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      font-family: sans-serif;
+      text-align: center;
+    }
+    canvas {
+      display: block;
+      margin: 20px auto;
+      border: 4px solid #555;
+      background: #000;
+    }
+    #menu, #settings, #gameover {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      background: url("images/background.png");
+      background-size: cover;
+      padding: 30px;
+      border-radius: 20px;
+    }
+    button {
+      background: none;
+      border: none;
+      margin: 10px;
+      cursor: pointer;
+    }
+    input {
+      text-align: center;
+      font-size: 20px;
+      width: 80px;
+    }
+  </style>
+</head>
+<body>
+  <div id="menu">
+    <button id="btn2"><img src="images/buttons/start-menu/button-2-players.png" id="img2"></button>
+    <button id="btn3"><img src="images/buttons/start-menu/button-3-players.png" id="img3"></button>
+    <button id="btn4"><img src="images/buttons/start-menu/button-4-players.png" id="img4"></button>
+  </div>
+
+  <div id="settings">
+    <p>Time (5–60 seconds): <input type="number" id="timeInput" min="5" max="60" value="20"></p>
+    <button id="startBtn"><img src="images/buttons/start-gray.png" id="startImg"></button>
+  </div>
+
+  <div id="gameover">
+    <h1 id="winnerText"></h1>
+    <button onclick="location.reload()">Restart</button>
+  </div>
+
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const menu = document.getElementById("menu");
+    const settings = document.getElementById("settings");
+    const gameover = document.getElementById("gameover");
+    const startBtn = document.getElementById("startBtn");
+    const startImg = document.getElementById("startImg");
+    const timeInput = document.getElementById("timeInput");
+    const winnerText = document.getElementById("winnerText");
+
+    let numPlayers = 0;
+    let gameTime = 20;
+    let gameRunning = false;
+    let players = [];
+    let bomb = null;
+    let countdown = 0;
+    let lastUpdate = 0;
+
+    // grid system
+    const TILE_SIZE = 40;
+    const gridWidth = Math.floor(canvas.width / TILE_SIZE);
+    const gridHeight = Math.floor(canvas.height / TILE_SIZE);
+    let map = [];
+
+    // load images
+    const imgWall = new Image();
+    imgWall.src = "images/blocks/wall.png";
+    const imgGround = new Image();
+    imgGround.src = "images/blocks/ground-slab.png";
+
+    // Controls for up to 4 players
+    const controls = [
+      {up:"KeyW",down:"KeyS",left:"KeyA",right:"KeyD",throw:"KeyQ",dash:"KeyE"},
+      {up:"KeyT",down:"KeyG",left:"KeyF",right:"KeyH",throw:"KeyR",dash:"KeyY"},
+      {up:"KeyI",down:"KeyK",left:"KeyJ",right:"KeyL",throw:"KeyU",dash:"KeyO"},
+      {up:"ArrowUp",down:"ArrowDown",left:"ArrowLeft",right:"ArrowRight",throw:"Slash",dash:"ShiftRight"}
+    ];
+
+    // Player class
+    class Player {
+      constructor(x,y,color,keys) {
+        this.x = x;
+        this.y = y;
+        this.size = TILE_SIZE*0.8;
+        this.color = color;
+        this.keys = keys;
+        this.alive = true;
+        this.hasBomb = false;
+        this.dashCooldown = 0;
+      }
+      draw() {
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x, this.y, this.size, this.size);
+        if(this.hasBomb && bomb){
+          ctx.drawImage(bomb.img, this.x+5, this.y-30,30,30);
+        }
+      }
+      move(input,dt) {
+        const speed = 3;
+        let nx=this.x, ny=this.y;
+
+        if(input[this.keys.up]) ny -= speed;
+        if(input[this.keys.down]) ny += speed;
+        if(input[this.keys.left]) nx -= speed;
+        if(input[this.keys.right]) nx += speed;
+
+        // dash
+        if(this.dashCooldown>0) this.dashCooldown -= dt;
+        if(input[this.keys.dash] && this.dashCooldown<=0){
+          let dashSpeed=80;
+          if(input[this.keys.up]) ny -= dashSpeed;
+          if(input[this.keys.down]) ny += dashSpeed;
+          if(input[this.keys.left]) nx -= dashSpeed;
+          if(input[this.keys.right]) nx += dashSpeed;
+          this.dashCooldown=1500; // 1.5s cooldown
+        }
+
+        // collision with walls
+        if(!collidesWithWall(nx, this.y, this.size)) this.x=nx;
+        if(!collidesWithWall(this.x, ny, this.size)) this.y=ny;
+      }
+    }
+
+    // Bomb class
+    class Bomb {
+      constructor(holder) {
+        this.holder = holder;
+        this.img = new Image();
+        this.img.src = "images/bomb.png";
+        this.vx = 0; this.vy = 0;
+        this.inAir = false;
+        this.x=0; this.y=0;
+      }
+      throw(direction) {
+        if(!this.inAir){
+          this.inAir = true;
+          this.holder.hasBomb=false;
+          this.x = this.holder.x;
+          this.y = this.holder.y;
+          this.vx = direction.vx;
+          this.vy = direction.vy;
+        }
+      }
+      update() {
+        if(this.inAir){
+          this.x += this.vx;
+          this.y += this.vy;
+
+          // bounce on walls
+          if(collidesWithWall(this.x,this.y,20)){
+            this.inAir=false;
+            this.holder.hasBomb=true;
+          }
+
+          // check hit players
+          for(let p of players){
+            if(p.alive && p!==this.holder){
+              if(this.x<p.x+p.size && this.x+20>p.x && this.y<p.y+p.size && this.y+20>p.y){
+                this.inAir=false;
+                this.holder=p;
+                p.hasBomb=true;
+              }
+            }
+          }
+        }
+      }
+      draw() {
+        if(this.inAir){
+          ctx.drawImage(this.img,this.x,this.y,30,30);
+        }
+      }
+    }
+
+    // Input tracking
+    const input={};
+    document.addEventListener("keydown",e=>{input[e.code]=true;});
+    document.addEventListener("keyup",e=>{input[e.code]=false;});
+
+    // UI Menu
+    menu.style.display="flex";
+    document.getElementById("btn2").onclick=()=>{numPlayers=2;menu.style.display="none";settings.style.display="flex";};
+    document.getElementById("btn3").onclick=()=>{numPlayers=3;menu.style.display="none";settings.style.display="flex";};
+    document.getElementById("btn4").onclick=()=>{numPlayers=4;menu.style.display="none";settings.style.display="flex";};
+
+    timeInput.addEventListener("input",()=>{
+      let val=parseInt(timeInput.value);
+      if(val>=5 && val<=60){
+        gameTime=val;
+        startImg.src="images/buttons/start.png";
+        startBtn.disabled=false;
+      } else {
+        startImg.src="images/buttons/start-gray.png";
+        startBtn.disabled=true;
+      }
+    });
+
+    startBtn.onclick=()=>{
+      if(gameTime>=5 && gameTime<=60){
+        settings.style.display="none";
+        startGame();
+      }
+    };
+
+    // Generate map
+    function generateMap(){
+      map=[];
+      for(let y=0;y<gridHeight;y++){
+        let row=[];
+        for(let x=0;x<gridWidth;x++){
+          if(x===0||y===0||x===gridWidth-1||y===gridHeight-1){
+            row.push(1); // wall border
+          } else if(Math.random()<0.1){
+            row.push(1); // random walls
+          } else {
+            row.push(0); // ground
+          }
+        }
+        map.push(row);
+      }
+    }
+
+    function collidesWithWall(x,y,size){
+      let gx1=Math.floor(x/TILE_SIZE);
+      let gy1=Math.floor(y/TILE_SIZE);
+      let gx2=Math.floor((x+size-1)/TILE_SIZE);
+      let gy2=Math.floor((y+size-1)/TILE_SIZE);
+      for(let gy=gy1;gy<=gy2;gy++){
+        for(let gx=gx1;gx<=gx2;gx++){
+          if(map[gy] && map[gy][gx]===1) return true;
+        }
+      }
+      return false;
+    }
+
+    function drawMap(){
+      for(let y=0;y<gridHeight;y++){
+        for(let x=0;x<gridWidth;x++){
+          if(map[y][x]===1){
+            ctx.drawImage(imgWall,x*TILE_SIZE,y*TILE_SIZE,TILE_SIZE,TILE_SIZE);
+          } else {
+            ctx.drawImage(imgGround,x*TILE_SIZE,y*TILE_SIZE,TILE_SIZE,TILE_SIZE);
+          }
+        }
+      }
+    }
+
+    function startGame(){
+      generateMap();
+      players=[];
+      const colors=["red","blue","green","yellow"];
+      for(let i=0;i<numPlayers;i++){
+        players.push(new Player(100+100*i,100,colors[i],controls[i]));
+      }
+      // give bomb to random player
+      let starter=players[Math.floor(Math.random()*players.length)];
+      starter.hasBomb=true;
+      bomb=new Bomb(starter);
+      countdown=gameTime*1000;
+      lastUpdate=performance.now();
+      gameRunning=true;
+      requestAnimationFrame(gameLoop);
+    }
+
+    function gameLoop(timestamp){
+      if(!gameRunning) return;
+      let dt=timestamp-lastUpdate;
+      lastUpdate=timestamp;
+      countdown-=dt;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      // draw map
+      drawMap();
+
+      // update
+      for(let p of players){
+        if(p.alive) p.move(input,dt);
+      }
+      bomb.update();
+
+      // draw
+      for(let p of players){ if(p.alive) p.draw(); }
+      bomb.draw();
+
+      ctx.fillStyle="white";
+      ctx.fillText("Time Left: "+Math.ceil(countdown/1000),10,20);
+
+      if(countdown<=0){
+        if(bomb.holder && bomb.holder.alive){
+          bomb.holder.alive=false;
+        }
+        let alive=players.filter(p=>p.alive);
+        if(alive.length<=1){
+          gameRunning=false;
+          endGame(alive[0]);
+        } else {
+          countdown=gameTime*1000;
+          let holder=alive[Math.floor(Math.random()*alive.length)];
+          holder.hasBomb=true;
+          bomb.holder=holder;
+          bomb.inAir=false;
+        }
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    function endGame(winner){
+      gameover.style.display="flex";
+      winnerText.innerText = winner? winner.color.toUpperCase()+" WINS!" : "NO WINNER";
+    }
+  </script>
+</body>
+</html>
