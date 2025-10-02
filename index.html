@@ -12,7 +12,6 @@ body {
   image-rendering: pixelated;
   overflow: hidden;
 }
-/* Center menus */
 .menu {
   display: flex;
   flex-direction: column;
@@ -23,15 +22,12 @@ body {
   background-size: cover;
 }
 .menu img {
-  width: 300px; /* 2× bigger */
+  width: 300px;
   margin: 15px 0;
   cursor: pointer;
   image-rendering: pixelated;
 }
-#gameCanvas {
-  display: none;
-  background: #000;
-}
+#gameCanvas { display: none; background: #000; }
 #timer {
   position: absolute;
   top: 10px;
@@ -39,7 +35,6 @@ body {
   transform: translateX(-50%);
   color: white;
   font-size: 18px;
-  font-family: 'Press Start 2P', monospace;
 }
 #gameover {
   display: none;
@@ -56,36 +51,29 @@ body {
 }
 #gameover img {
   margin-top: 20px;
-  width: 300px; /* restart button size */
+  width: 300px;
   cursor: pointer;
   image-rendering: pixelated;
 }
 </style>
 </head>
 <body>
-<!-- Start Menu -->
 <div id="startMenu" class="menu">
   <img id="btn2" src="images/buttons/start-menu/button-2-players.png">
   <img id="btn3" src="images/buttons/start-menu/button-3-players.png">
   <img id="btn4" src="images/buttons/start-menu/button-4-players.png">
 </div>
 
-<!-- Game Settings -->
 <div id="settingsMenu" class="menu" style="display:none;">
   <label style="color:white;">Time (5-60s):</label>
-  <input id="timeInput" type="number" value="30" min="5" max="60"
-         style="font-family:'Press Start 2P'; font-size:16px; text-align:center;">
+  <input id="timeInput" type="number" value="30" min="5" max="60" style="font-family:'Press Start 2P'; font-size:16px; text-align:center;">
   <br>
   <img id="startBtn" src="images/buttons/start-gray.png">
 </div>
 
-<!-- Timer -->
 <div id="timer"></div>
-
-<!-- Game Canvas -->
 <canvas id="gameCanvas" width="640" height="480"></canvas>
 
-<!-- Game Over -->
 <div id="gameover">
   <h1 id="winnerText"></h1>
   <img id="restartBtn" src="images/buttons/restart.png">
@@ -104,15 +92,13 @@ const mapWidth = 20;
 const mapHeight = 15;
 let map = [];
 
-// Controls
 const controls = [
-  {up:'KeyW', down:'KeyS', left:'KeyA', right:'KeyD', throw:'KeyQ', dash:'KeyE'},
-  {up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight', throw:'Slash', dash:'ShiftRight'},
-  {up:'KeyI', down:'KeyK', left:'KeyJ', right:'KeyL', throw:'KeyU', dash:'KeyO'},
-  {up:'KeyT', down:'KeyG', left:'KeyF', right:'KeyH', throw:'KeyR', dash:'KeyY'}
+  {up:'KeyW', down:'KeyS', left:'KeyA', right:'KeyD', throw:'KeyQ'},
+  {up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight', throw:'Slash'},
+  {up:'KeyI', down:'KeyK', left:'KeyJ', right:'KeyL', throw:'KeyU'},
+  {up:'KeyT', down:'KeyG', left:'KeyF', right:'KeyH', throw:'KeyR'}
 ];
 
-// Start Menu buttons
 document.getElementById("btn2").onclick = ()=>{ totalPlayers=2; openSettings(); };
 document.getElementById("btn3").onclick = ()=>{ totalPlayers=3; openSettings(); };
 document.getElementById("btn4").onclick = ()=>{ totalPlayers=4; openSettings(); };
@@ -120,7 +106,7 @@ document.getElementById("btn4").onclick = ()=>{ totalPlayers=4; openSettings(); 
 function openSettings(){
   document.getElementById("startMenu").style.display="none";
   document.getElementById("settingsMenu").style.display="flex";
-  validateTime(); // initial validation
+  validateTime();
 }
 
 const timeInput = document.getElementById("timeInput");
@@ -139,7 +125,6 @@ function validateTime(){
 
 timeInput.addEventListener("input", validateTime);
 
-// Generate map
 function generateMap(){
   map=[];
   for(let y=0;y<mapHeight;y++){
@@ -155,7 +140,6 @@ function generateMap(){
   }
 }
 
-// Start Game
 function startGame(){
   document.getElementById("settingsMenu").style.display="none";
   canvas.style.display="block";
@@ -166,13 +150,10 @@ function startGame(){
     players.push({
       x:tileSize*(2+i*3),
       y:tileSize*2,
-      w:28,
-      h:28,
+      w:28, h:28,
       color:`hsl(${i*90},80%,60%)`,
-      alive:true,
-      hasBomb:false,
-      ctrl:controls[i],
-      dashCD:0
+      alive:true, hasBomb:false,
+      ctrl:controls[i]
     });
   }
   bomb = {holder:Math.floor(Math.random()*totalPlayers)};
@@ -182,7 +163,6 @@ function startGame(){
   gameInterval = setInterval(updateGame, 1000/60);
 }
 
-// Timer
 function startTimer(){
   let timeLeft = gameTime;
   document.getElementById("timer").innerText=timeLeft;
@@ -196,7 +176,6 @@ function startTimer(){
   },1000);
 }
 
-// Bomb explosion
 function explodeBomb(){
   let loser = bomb.holder;
   players[loser].alive=false;
@@ -211,7 +190,6 @@ function explodeBomb(){
   }
 }
 
-// End game
 function endGame(winner){
   clearInterval(gameInterval);
   clearInterval(timerInterval);
@@ -222,12 +200,10 @@ function endGame(winner){
 }
 document.getElementById("restartBtn").onclick=()=>location.reload();
 
-// Input
 let keys={};
 window.addEventListener("keydown",e=>{keys[e.code]=true;});
 window.addEventListener("keyup",e=>{keys[e.code]=false;});
 
-// Collision detection
 function canMove(x, y, w, h){
   const left = Math.floor(x / tileSize);
   const right = Math.floor((x+w-1) / tileSize);
@@ -241,11 +217,9 @@ function canMove(x, y, w, h){
   return true;
 }
 
-// Game loop
 function updateGame(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // Draw map
   for(let y=0;y<mapHeight;y++){
     for(let x=0;x<mapWidth;x++){
       let tile=map[y][x];
@@ -255,7 +229,6 @@ function updateGame(){
     }
   }
 
-  // Update players
   players.forEach((p,i)=>{
     if(!p.alive) return;
     let speed=2;
@@ -266,15 +239,6 @@ function updateGame(){
     if(keys[p.ctrl.left]) newX-=speed;
     if(keys[p.ctrl.right]) newX+=speed;
 
-    // Dash
-    if(keys[p.ctrl.dash] && p.dashCD<=0){
-      newX += (keys[p.ctrl.left]?-50:0)+(keys[p.ctrl.right]?50:0);
-      newY += (keys[p.ctrl.up]?-50:0)+(keys[p.ctrl.down]?50:0);
-      p.dashCD=60;
-    }
-    if(p.dashCD>0) p.dashCD--;
-
-    // Collision with walls
     if(canMove(newX, p.y, p.w, p.h)) p.x=newX;
     if(canMove(p.x, newY, p.w, p.h)) p.y=newY;
 
@@ -283,18 +247,17 @@ function updateGame(){
 
     // Bomb throw
     if(p.hasBomb && keys[p.ctrl.throw]){
-      for(let j=0;j<players.length;j++){
-        if(i!==j && players[j].alive &&
-          Math.abs(players[j].x-p.x)<32 && Math.abs(players[j].y-p.y)<32){
-          players[j].hasBomb=true;
+      players.forEach((target,j)=>{
+        if(i!==j && target.alive &&
+          Math.abs(target.x-p.x)<32 && Math.abs(target.y-p.y)<32){
+          target.hasBomb=true;
           p.hasBomb=false;
           bomb.holder=j;
         }
-      }
+      });
     }
   });
 
-  // Draw bomb
   if(bomb && players[bomb.holder]){
     let holder=players[bomb.holder];
     let img=new Image();
