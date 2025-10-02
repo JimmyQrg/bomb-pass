@@ -104,7 +104,7 @@ const mapWidth = 20;
 const mapHeight = 15;
 let map = [];
 
-// Controls: P1, P2, P3, P4
+// Controls
 const controls = [
   {up:'KeyW', down:'KeyS', left:'KeyA', right:'KeyD', throw:'KeyQ', dash:'KeyE'},
   {up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight', throw:'Slash', dash:'ShiftRight'},
@@ -120,20 +120,24 @@ document.getElementById("btn4").onclick = ()=>{ totalPlayers=4; openSettings(); 
 function openSettings(){
   document.getElementById("startMenu").style.display="none";
   document.getElementById("settingsMenu").style.display="flex";
+  validateTime(); // initial validation
 }
 
-document.getElementById("timeInput").addEventListener("input", e=>{
-  let val = parseInt(e.target.value);
-  let startBtn = document.getElementById("startBtn");
-  if(val>=5 && val<=60){
-    gameTime = val;
+const timeInput = document.getElementById("timeInput");
+const startBtn = document.getElementById("startBtn");
+
+function validateTime(){
+  const val = parseInt(timeInput.value);
+  if(val >= 5 && val <= 60){
     startBtn.src = "images/buttons/start.png";
     startBtn.onclick=startGame;
   } else {
     startBtn.src = "images/buttons/start-gray.png";
     startBtn.onclick=null;
   }
-});
+}
+
+timeInput.addEventListener("input", validateTime);
 
 // Generate map
 function generateMap(){
@@ -223,6 +227,20 @@ let keys={};
 window.addEventListener("keydown",e=>{keys[e.code]=true;});
 window.addEventListener("keyup",e=>{keys[e.code]=false;});
 
+// Collision detection
+function canMove(x, y, w, h){
+  const left = Math.floor(x / tileSize);
+  const right = Math.floor((x+w-1) / tileSize);
+  const top = Math.floor(y / tileSize);
+  const bottom = Math.floor((y+h-1) / tileSize);
+  for(let i=top;i<=bottom;i++){
+    for(let j=left;j<=right;j++){
+      if(map[i] && map[i][j]==="wall") return false;
+    }
+  }
+  return true;
+}
+
 // Game loop
 function updateGame(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -241,24 +259,24 @@ function updateGame(){
   players.forEach((p,i)=>{
     if(!p.alive) return;
     let speed=2;
-    if(keys[p.ctrl.up]) p.y-=speed;
-    if(keys[p.ctrl.down]) p.y+=speed;
-    if(keys[p.ctrl.left]) p.x-=speed;
-    if(keys[p.ctrl.right]) p.x+=speed;
+    let newX = p.x;
+    let newY = p.y;
+    if(keys[p.ctrl.up]) newY-=speed;
+    if(keys[p.ctrl.down]) newY+=speed;
+    if(keys[p.ctrl.left]) newX-=speed;
+    if(keys[p.ctrl.right]) newX+=speed;
 
     // Dash
     if(keys[p.ctrl.dash] && p.dashCD<=0){
-      p.x+= (keys[p.ctrl.left]?-50:0)+(keys[p.ctrl.right]?50:0);
-      p.y+= (keys[p.ctrl.up]?-50:0)+(keys[p.ctrl.down]?50:0);
+      newX += (keys[p.ctrl.left]?-50:0)+(keys[p.ctrl.right]?50:0);
+      newY += (keys[p.ctrl.up]?-50:0)+(keys[p.ctrl.down]?50:0);
       p.dashCD=60;
     }
     if(p.dashCD>0) p.dashCD--;
 
-    // Boundaries
-    if(p.x<0)p.x=0;
-    if(p.y<0)p.y=0;
-    if(p.x>canvas.width-p.w)p.x=canvas.width-p.w;
-    if(p.y>canvas.height-p.h)p.y=canvas.height-p.h;
+    // Collision with walls
+    if(canMove(newX, p.y, p.w, p.h)) p.x=newX;
+    if(canMove(p.x, newY, p.w, p.h)) p.y=newY;
 
     ctx.fillStyle=p.color;
     ctx.fillRect(p.x,p.y,p.w,p.h);
