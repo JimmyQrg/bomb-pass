@@ -3,18 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <title>Bomb Pass</title>
+
+  <!-- Pixel Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
   <style>
     body {
       margin: 0;
-      background: #111;
-      font-family: sans-serif;
+      background: url("images/background.png") no-repeat center center fixed;
+      background-size: cover;
+      font-family: 'Press Start 2P', monospace;
+      color: white;
       text-align: center;
+      image-rendering: pixelated;
     }
     canvas {
       display: block;
-      margin: 20px auto;
+      margin: 0 auto;
       border: 4px solid #555;
-      background: #000;
+      background: black;
+      image-rendering: pixelated;
     }
     #menu, #settings, #gameover {
       position: absolute;
@@ -24,10 +32,6 @@
       display: none;
       flex-direction: column;
       align-items: center;
-      background: url("images/background.png");
-      background-size: cover;
-      padding: 30px;
-      border-radius: 20px;
     }
     button {
       background: none;
@@ -37,26 +41,30 @@
     }
     input {
       text-align: center;
-      font-size: 20px;
+      font-size: 14px;
       width: 80px;
+      font-family: 'Press Start 2P', monospace;
     }
   </style>
 </head>
 <body>
+  <!-- Menu -->
   <div id="menu">
-    <button id="btn2"><img src="images/buttons/start-menu/button-2-players.png" id="img2"></button>
-    <button id="btn3"><img src="images/buttons/start-menu/button-3-players.png" id="img3"></button>
-    <button id="btn4"><img src="images/buttons/start-menu/button-4-players.png" id="img4"></button>
+    <button id="btn2"><img src="images/buttons/start-menu/button-2-players.png"></button>
+    <button id="btn3"><img src="images/buttons/start-menu/button-3-players.png"></button>
+    <button id="btn4"><img src="images/buttons/start-menu/button-4-players.png"></button>
   </div>
 
+  <!-- Settings -->
   <div id="settings">
-    <p>Time (5–60 seconds): <input type="number" id="timeInput" min="5" max="60" value="20"></p>
+    <p>TIME (5–60 SEC): <input type="number" id="timeInput" min="5" max="60" value="20"></p>
     <button id="startBtn"><img src="images/buttons/start-gray.png" id="startImg"></button>
   </div>
 
+  <!-- Game Over -->
   <div id="gameover">
     <h1 id="winnerText"></h1>
-    <button onclick="location.reload()">Restart</button>
+    <button onclick="location.reload()">RESTART</button>
   </div>
 
   <canvas id="gameCanvas" width="800" height="600"></canvas>
@@ -64,6 +72,9 @@
   <script>
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+
+    // --- UI Elements ---
     const menu = document.getElementById("menu");
     const settings = document.getElementById("settings");
     const gameover = document.getElementById("gameover");
@@ -72,80 +83,103 @@
     const timeInput = document.getElementById("timeInput");
     const winnerText = document.getElementById("winnerText");
 
+    // --- Game Vars ---
     let numPlayers = 0;
     let gameTime = 20;
     let gameRunning = false;
-    let players = [];
-    let bomb = null;
     let countdown = 0;
     let lastUpdate = 0;
+    let players = [];
+    let bomb = null;
 
-    // grid system
-    const TILE_SIZE = 40;
-    const gridWidth = Math.floor(canvas.width / TILE_SIZE);
-    const gridHeight = Math.floor(canvas.height / TILE_SIZE);
+    // --- Map (grid of ground + walls) ---
+    const tileSize = 40;
+    const cols = Math.floor(canvas.width / tileSize);
+    const rows = Math.floor(canvas.height / tileSize);
     let map = [];
 
-    // load images
-    const imgWall = new Image();
-    imgWall.src = "images/blocks/wall.png";
-    const imgGround = new Image();
-    imgGround.src = "images/blocks/ground-slab.png";
+    const groundImg = new Image();
+    groundImg.src = "images/blocks/ground-slab.png";
+    const wallImg = new Image();
+    wallImg.src = "images/blocks/wall.png";
 
-    // Controls for up to 4 players
+    function generateMap() {
+      map = [];
+      for (let y = 0; y < rows; y++) {
+        let row = [];
+        for (let x = 0; x < cols; x++) {
+          if (x === 0 || y === 0 || x === cols - 1 || y === rows - 1 || Math.random() < 0.1) {
+            row.push("W"); // wall
+          } else {
+            row.push("G"); // ground
+          }
+        }
+        map.push(row);
+      }
+    }
+
+    function drawMap() {
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let img = map[y][x] === "W" ? wallImg : groundImg;
+          ctx.drawImage(img, x * tileSize, y * tileSize, tileSize, tileSize);
+        }
+      }
+    }
+
+    function isWall(x, y) {
+      let col = Math.floor(x / tileSize);
+      let row = Math.floor(y / tileSize);
+      if (row < 0 || col < 0 || row >= rows || col >= cols) return true;
+      return map[row][col] === "W";
+    }
+
+    // --- Controls ---
     const controls = [
-      {up:"KeyW",down:"KeyS",left:"KeyA",right:"KeyD",throw:"KeyQ",dash:"KeyE"},
-      {up:"KeyT",down:"KeyG",left:"KeyF",right:"KeyH",throw:"KeyR",dash:"KeyY"},
-      {up:"KeyI",down:"KeyK",left:"KeyJ",right:"KeyL",throw:"KeyU",dash:"KeyO"},
-      {up:"ArrowUp",down:"ArrowDown",left:"ArrowLeft",right:"ArrowRight",throw:"Slash",dash:"ShiftRight"}
+      {up:"KeyW",down:"KeyS",left:"KeyA",right:"KeyD",throw:"KeyQ",dash:"KeyE"},       // P1
+      {up:"ArrowUp",down:"ArrowDown",left:"ArrowLeft",right:"ArrowRight",throw:"Slash",dash:"ShiftRight"}, // P2
+      {up:"KeyI",down:"KeyK",left:"KeyJ",right:"KeyL",throw:"KeyU",dash:"KeyO"},       // P3
+      {up:"KeyT",down:"KeyG",left:"KeyF",right:"KeyH",throw:"KeyR",dash:"KeyY"}        // P4
     ];
 
-    // Player class
+    // --- Classes ---
     class Player {
       constructor(x,y,color,keys) {
         this.x = x;
         this.y = y;
-        this.size = TILE_SIZE*0.8;
+        this.size = 30;
         this.color = color;
         this.keys = keys;
         this.alive = true;
         this.hasBomb = false;
-        this.dashCooldown = 0;
+        this.lastDir = {x:1,y:0};
       }
       draw() {
         ctx.fillStyle = this.color;
         ctx.fillRect(this.x, this.y, this.size, this.size);
-        if(this.hasBomb && bomb){
-          ctx.drawImage(bomb.img, this.x+5, this.y-30,30,30);
-        }
       }
-      move(input,dt) {
+      move(input) {
         const speed = 3;
-        let nx=this.x, ny=this.y;
+        let dx=0,dy=0;
+        if(input[this.keys.up]) dy=-1;
+        if(input[this.keys.down]) dy=1;
+        if(input[this.keys.left]) dx=-1;
+        if(input[this.keys.right]) dx=1;
+        if(dx!==0||dy!==0) this.lastDir={x:dx,y:dy};
 
-        if(input[this.keys.up]) ny -= speed;
-        if(input[this.keys.down]) ny += speed;
-        if(input[this.keys.left]) nx -= speed;
-        if(input[this.keys.right]) nx += speed;
-
-        // dash
-        if(this.dashCooldown>0) this.dashCooldown -= dt;
-        if(input[this.keys.dash] && this.dashCooldown<=0){
-          let dashSpeed=80;
-          if(input[this.keys.up]) ny -= dashSpeed;
-          if(input[this.keys.down]) ny += dashSpeed;
-          if(input[this.keys.left]) nx -= dashSpeed;
-          if(input[this.keys.right]) nx += dashSpeed;
-          this.dashCooldown=1500; // 1.5s cooldown
+        let newX=this.x+dx*speed;
+        let newY=this.y+dy*speed;
+        if(!isWall(newX,this.y) && !isWall(newX+this.size-1,this.y) &&
+           !isWall(newX,this.y+this.size-1) && !isWall(newX+this.size-1,this.y+this.size-1)){
+          this.x=newX;
         }
-
-        // collision with walls
-        if(!collidesWithWall(nx, this.y, this.size)) this.x=nx;
-        if(!collidesWithWall(this.x, ny, this.size)) this.y=ny;
+        if(!isWall(this.x,newY) && !isWall(this.x+this.size-1,newY) &&
+           !isWall(this.x,newY+this.size-1) && !isWall(this.x+this.size-1,newY+this.size-1)){
+          this.y=newY;
+        }
       }
     }
 
-    // Bomb class
     class Bomb {
       constructor(holder) {
         this.holder = holder;
@@ -155,27 +189,26 @@
         this.inAir = false;
         this.x=0; this.y=0;
       }
-      throw(direction) {
+      throw(dir) {
         if(!this.inAir){
           this.inAir = true;
           this.holder.hasBomb=false;
           this.x = this.holder.x;
           this.y = this.holder.y;
-          this.vx = direction.vx;
-          this.vy = direction.vy;
+          this.vx = dir.x*6;
+          this.vy = dir.y*6;
         }
       }
       update() {
         if(this.inAir){
           this.x += this.vx;
           this.y += this.vy;
-
-          // bounce on walls
-          if(collidesWithWall(this.x,this.y,20)){
+          // bounce if wall
+          if(isWall(this.x,this.y) || isWall(this.x+20,this.y) ||
+             isWall(this.x,this.y+20) || isWall(this.x+20,this.y+20)){
             this.inAir=false;
             this.holder.hasBomb=true;
           }
-
           // check hit players
           for(let p of players){
             if(p.alive && p!==this.holder){
@@ -190,17 +223,19 @@
       }
       draw() {
         if(this.inAir){
-          ctx.drawImage(this.img,this.x,this.y,30,30);
+          ctx.drawImage(this.img,this.x,this.y,20,20);
+        } else if(this.holder && this.holder.alive){
+          ctx.drawImage(this.img,this.holder.x+5,this.holder.y-20,20,20);
         }
       }
     }
 
-    // Input tracking
+    // --- Input ---
     const input={};
     document.addEventListener("keydown",e=>{input[e.code]=true;});
     document.addEventListener("keyup",e=>{input[e.code]=false;});
 
-    // UI Menu
+    // --- UI Flow ---
     menu.style.display="flex";
     document.getElementById("btn2").onclick=()=>{numPlayers=2;menu.style.display="none";settings.style.display="flex";};
     document.getElementById("btn3").onclick=()=>{numPlayers=3;menu.style.display="none";settings.style.display="flex";};
@@ -225,57 +260,14 @@
       }
     };
 
-    // Generate map
-    function generateMap(){
-      map=[];
-      for(let y=0;y<gridHeight;y++){
-        let row=[];
-        for(let x=0;x<gridWidth;x++){
-          if(x===0||y===0||x===gridWidth-1||y===gridHeight-1){
-            row.push(1); // wall border
-          } else if(Math.random()<0.1){
-            row.push(1); // random walls
-          } else {
-            row.push(0); // ground
-          }
-        }
-        map.push(row);
-      }
-    }
-
-    function collidesWithWall(x,y,size){
-      let gx1=Math.floor(x/TILE_SIZE);
-      let gy1=Math.floor(y/TILE_SIZE);
-      let gx2=Math.floor((x+size-1)/TILE_SIZE);
-      let gy2=Math.floor((y+size-1)/TILE_SIZE);
-      for(let gy=gy1;gy<=gy2;gy++){
-        for(let gx=gx1;gx<=gx2;gx++){
-          if(map[gy] && map[gy][gx]===1) return true;
-        }
-      }
-      return false;
-    }
-
-    function drawMap(){
-      for(let y=0;y<gridHeight;y++){
-        for(let x=0;x<gridWidth;x++){
-          if(map[y][x]===1){
-            ctx.drawImage(imgWall,x*TILE_SIZE,y*TILE_SIZE,TILE_SIZE,TILE_SIZE);
-          } else {
-            ctx.drawImage(imgGround,x*TILE_SIZE,y*TILE_SIZE,TILE_SIZE,TILE_SIZE);
-          }
-        }
-      }
-    }
-
+    // --- Game Start ---
     function startGame(){
       generateMap();
       players=[];
       const colors=["red","blue","green","yellow"];
       for(let i=0;i<numPlayers;i++){
-        players.push(new Player(100+100*i,100,colors[i],controls[i]));
+        players.push(new Player(100+150*i,200,colors[i],controls[i]));
       }
-      // give bomb to random player
       let starter=players[Math.floor(Math.random()*players.length)];
       starter.hasBomb=true;
       bomb=new Bomb(starter);
@@ -285,28 +277,34 @@
       requestAnimationFrame(gameLoop);
     }
 
+    // --- Game Loop ---
     function gameLoop(timestamp){
       if(!gameRunning) return;
       let dt=timestamp-lastUpdate;
       lastUpdate=timestamp;
       countdown-=dt;
-      ctx.clearRect(0,0,canvas.width,canvas.height);
 
-      // draw map
+      ctx.clearRect(0,0,canvas.width,canvas.height);
       drawMap();
 
-      // update
+      // players move
+      for(let p of players){ if(p.alive) p.move(input); }
+      // throw check
       for(let p of players){
-        if(p.alive) p.move(input,dt);
+        if(p.alive && p.hasBomb && input[p.keys.throw]){
+          bomb.throw(p.lastDir);
+        }
       }
-      bomb.update();
 
-      // draw
+      bomb.update();
       for(let p of players){ if(p.alive) p.draw(); }
       bomb.draw();
 
+      // HUD
       ctx.fillStyle="white";
-      ctx.fillText("Time Left: "+Math.ceil(countdown/1000),10,20);
+      ctx.font="16px 'Press Start 2P'";
+      ctx.textAlign="center";
+      ctx.fillText("TIME LEFT: "+Math.ceil(countdown/1000),canvas.width/2,20);
 
       if(countdown<=0){
         if(bomb.holder && bomb.holder.alive){
@@ -324,7 +322,6 @@
           bomb.inAir=false;
         }
       }
-
       requestAnimationFrame(gameLoop);
     }
 
