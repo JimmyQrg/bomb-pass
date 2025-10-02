@@ -5,41 +5,22 @@
 <title>Bomb Pass</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
-  body {
-    margin: 0;
-    background: black;
-    font-family: 'Press Start 2P', monospace;
-    color: white;
-    overflow: hidden;
-  }
-  canvas {
-    display: block;
-    margin: 0 auto;
-    background: black;
-    image-rendering: pixelated;
-  }
+  body { margin:0; background:black; display:flex; justify-content:center; align-items:center; height:100vh; }
+  canvas { image-rendering: pixelated; background:#000; }
   #menu, #settings, #gameover {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    background: url("images/background.png");
-    background-size: cover;
-    padding: 20px;
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    display:none; flex-direction:column; align-items:center;
+    font-family:'Press Start 2P', monospace; background:url("images/background.png") center/cover no-repeat;
+    padding:20px; border:4px solid #444;
   }
-  button {
-    background: none;
-    border: none;
-    margin: 10px;
-    cursor: pointer;
-    image-rendering: pixelated;
-    transform: scale(2); /* buttons are 2x bigger */
+  #menu button, #settings button {
+    background:none; border:none; margin:10px; cursor:pointer;
   }
 </style>
 </head>
 <body>
+<canvas id="gameCanvas"></canvas>
+
 <div id="menu">
   <button id="btn2"><img src="images/buttons/start-menu/button-2-players.png"></button>
   <button id="btn3"><img src="images/buttons/start-menu/button-3-players.png"></button>
@@ -47,220 +28,248 @@
 </div>
 
 <div id="settings">
-  <p>TIME (5–60 SEC): <input type="number" id="timeInput" min="5" max="60" value="20"></p>
-  <button id="startBtn"><img src="images/buttons/start-gray.png" id="startImg"></button>
+  <label style="color:white;">Time (5–60s): <input id="timeInput" type="number" min="5" max="60" value="20"></label>
+  <button id="startBtn"><img src="images/buttons/start.png"></button>
 </div>
 
 <div id="gameover">
-  <h1 id="winnerText"></h1>
+  <h1 id="winnerText" style="color:white;"></h1>
   <button onclick="location.reload()"><img src="images/buttons/restart.png"></button>
 </div>
 
-<canvas id="gameCanvas"></canvas>
-
 <script>
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-ctx.imageSmoothingEnabled = false;
+const canvas=document.getElementById("gameCanvas");
+const ctx=canvas.getContext("2d");
+
+let mapSize=40; // bigger map
+let grid=[], players=[], bomb=null, gameRunning=false, timeLeft=0, startTime=20, numPlayers=2;
+
+// Camera
+let camX=0, camY=0, camZoom=1;
+
+// Resize canvas
+function resizeCanvas(){
+  let size=Math.min(window.innerWidth, window.innerHeight);
+  canvas.width=canvas.height=size;
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
 
 // Load images
-let wallImg = new Image(); wallImg.src = "images/blocks/wall.png";
-let groundImg = new Image(); groundImg.src = "images/blocks/ground-slab.png";
-
-// Player images
-let playerImgs = [
-  { normal: new Image(), bomb: new Image() },
-  { normal: new Image(), bomb: new Image() },
-  { normal: new Image(), bomb: new Image() },
-  { normal: new Image(), bomb: new Image() }
-];
-playerImgs[0].normal.src = "images/players/player-1.png";
-playerImgs[0].bomb.src   = "images/players/player-1-bomb.png";
-playerImgs[1].normal.src = "images/players/player-2.png";
-playerImgs[1].bomb.src   = "images/players/player-2-bomb.png";
-playerImgs[2].normal.src = "images/players/player-3.png";
-playerImgs[2].bomb.src   = "images/players/player-3-bomb.png";
-playerImgs[3].normal.src = "images/players/player-4.png";
-playerImgs[3].bomb.src   = "images/players/player-4-bomb.png";
-
-let restartImg = new Image(); restartImg.src = "images/buttons/restart.png";
-let startGrayImg = new Image(); startGrayImg.src = "images/buttons/start-gray.png";
-let startImg = new Image(); startImg.src = "images/buttons/start.png";
-
-// Game state
-let numPlayers = 2;
-let players = [];
-let map = [];
-let tileSize = 48;
-let rows = Math.floor(canvas.height / tileSize);
-let cols = Math.floor(canvas.width / tileSize);
-
-let bomb = null;
-let timeLeft = 20;
-let gameInterval;
-let gameRunning = false;
-
-// Key mapping
-const controls = [
-  {up:"KeyW",down:"KeyS",left:"KeyA",right:"KeyD",throw:"KeyQ"},
-  {up:"ArrowUp",down:"ArrowDown",left:"ArrowLeft",right:"ArrowRight",throw:"Slash"},
-  {up:"KeyI",down:"KeyK",left:"KeyJ",right:"KeyL",throw:"KeyU"},
-  {up:"KeyT",down:"KeyG",left:"KeyF",right:"KeyH",throw:"KeyR"}
-];
-let keys = {};
-
-document.addEventListener("keydown", e => keys[e.code]=true);
-document.addEventListener("keyup", e => keys[e.code]=false);
-
-// Menu logic
-document.getElementById("menu").style.display="flex";
-document.getElementById("btn2").onclick=()=>{numPlayers=2;showSettings();};
-document.getElementById("btn3").onclick=()=>{numPlayers=3;showSettings();};
-document.getElementById("btn4").onclick=()=>{numPlayers=4;showSettings();};
-
-function showSettings(){
-  document.getElementById("menu").style.display="none";
-  document.getElementById("settings").style.display="flex";
+const wallImg=new Image(); wallImg.src="images/blocks/wall.png";
+const groundImg=new Image(); groundImg.src="images/blocks/ground-slab.png";
+const bombImg=new Image(); bombImg.src="images/bomb.png";
+let playerImgs={};
+for(let i=1;i<=4;i++){
+  playerImgs[i]=new Image(); playerImgs[i].src=`images/players/player-${i}.png`;
+  playerImgs[i+"b"]=new Image(); playerImgs[i+"b"].src=`images/players/player-${i}-bomb.png`;
 }
 
-let timeInput = document.getElementById("timeInput");
-let startButton = document.getElementById("startBtn");
-timeInput.oninput=()=>{
-  let v=parseInt(timeInput.value);
-  if(v>=5 && v<=60){
-    document.getElementById("startImg").src="images/buttons/start.png";
-    startButton.onclick=startGame;
-  }else{
-    document.getElementById("startImg").src="images/buttons/start-gray.png";
-    startButton.onclick=null;
-  }
-};
+// Key binds
+const controls=[
+  {up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD',throw:'KeyQ'},
+  {up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',throw:'Slash'},
+  {up:'KeyI',down:'KeyK',left:'KeyJ',right:'KeyL',throw:'KeyU'},
+  {up:'KeyT',down:'KeyG',left:'KeyF',right:'KeyH',throw:'KeyR'},
+];
+let keys={};
 
-function startGame(){
-  document.getElementById("settings").style.display="none";
-  initGame();
-  gameRunning=true;
-  gameInterval=setInterval(update,1000/60);
-}
-
-function initGame(){
-  // Build map
-  map=[];
-  for(let r=0;r<rows;r++){
+// Map generator
+function generateMap(){
+  grid=[];
+  for(let y=0;y<mapSize;y++){
     let row=[];
-    for(let c=0;c<cols;c++){
-      if(r===0||c===0||r===rows-1||c===cols-1||Math.random()<0.1){
+    for(let x=0;x<mapSize;x++){
+      if(x===0||y===0||x===mapSize-1||y===mapSize-1||Math.random()<0.15){
         row.push(1); // wall
-      } else {
-        row.push(0); // ground
-      }
+      }else row.push(0); // ground
     }
-    map.push(row);
+    grid.push(row);
   }
-  // Players
+}
+
+// Spawn players avoiding walls
+function spawnPlayers(){
   players=[];
   for(let i=0;i<numPlayers;i++){
-    let px,py;
+    let x,y;
     do{
-      px=Math.floor(Math.random()*cols);
-      py=Math.floor(Math.random()*rows);
-    }while(map[py][px]===1);
-    players.push({x:px,y:py,speed:0.1,alive:true});
+      x=Math.floor(Math.random()*mapSize);
+      y=Math.floor(Math.random()*mapSize);
+    }while(grid[y][x]===1 || players.some(p=>p.x===x&&p.y===y));
+    players.push({id:i+1,x,y,alive:true,hasBomb:false});
   }
-  // Bomb
-  bomb={holder:Math.floor(Math.random()*numPlayers),flying:false,x:0,y:0,vx:0,vy:0};
 }
 
+// Give bomb to random player
+function giveBomb(){
+  let alive=players.filter(p=>p.alive);
+  let pick=alive[Math.floor(Math.random()*alive.length)];
+  pick.hasBomb=true;
+  bomb={x:pick.x,y:pick.y,dir:null,holder:pick};
+}
+
+// Collision check
+function isBlocked(x,y){
+  if(x<0||y<0||x>=mapSize||y>=mapSize) return true;
+  if(grid[y][x]===1) return true;
+  if(players.some(p=>p.alive && p.x===x && p.y===y)) return true;
+  return false;
+}
+
+// Smooth interpolation
+function lerp(a,b,t){ return a + (b-a)*t; }
+
+// Game loop
 function update(){
   if(!gameRunning) return;
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  // Draw map
-  for(let r=0;r<rows;r++){
-    for(let c=0;c<cols;c++){
-      let img = map[r][c]===1?wallImg:groundImg;
-      ctx.drawImage(img,c*tileSize,r*tileSize,tileSize,tileSize);
-    }
-  }
-  // Player movement
-  for(let i=0;i<numPlayers;i++){
-    let p=players[i];
-    if(!p.alive) continue;
+
+  // --- Movement ---
+  players.forEach((p,i)=>{
+    if(!p.alive) return;
     let ctrl=controls[i];
-    let nx=p.x,ny=p.y;
-    if(keys[ctrl.up]) ny-=p.speed*tileSize;
-    if(keys[ctrl.down]) ny+=p.speed*tileSize;
-    if(keys[ctrl.left]) nx-=p.speed*tileSize;
-    if(keys[ctrl.right]) nx+=p.speed*tileSize;
-    let gridX=Math.floor(nx/tileSize);
-    let gridY=Math.floor(ny/tileSize);
-    if(map[gridY] && map[gridY][gridX]===0){
+    let nx=p.x, ny=p.y;
+    if(keys[ctrl.up]) ny--;
+    if(keys[ctrl.down]) ny++;
+    if(keys[ctrl.left]) nx--;
+    if(keys[ctrl.right]) nx++;
+    if((nx!==p.x||ny!==p.y) && !isBlocked(nx,ny)){
       p.x=nx; p.y=ny;
+      if(bomb && bomb.holder===p){ bomb.x=p.x; bomb.y=p.y; }
     }
-    // Draw player sprite
-    let sprite=(bomb.holder===i)?playerImgs[i].bomb:playerImgs[i].normal;
-    ctx.drawImage(sprite,p.x,p.y,tileSize,tileSize);
-    // Throw bomb
-    if(bomb.holder===i && keys[ctrl.throw]){
-      bomb.holder=null;
-      bomb.flying=true;
-      bomb.x=p.x; bomb.y=p.y;
-      bomb.vx=(keys[ctrl.left]?-1:keys[ctrl.right]?1:0)*4;
-      bomb.vy=(keys[ctrl.up]?-1:keys[ctrl.down]?1:0)*4;
-      if(bomb.vx===0 && bomb.vy===0) bomb.vx=4; // default right
+  });
+
+  // --- Throw ---
+  players.forEach((p,i)=>{
+    if(!p.alive) return;
+    if(bomb && bomb.holder===p){
+      if(keys[controls[i].throw]){
+        let dirX=0,dirY=0;
+        if(keys[controls[i].up]) dirY=-1;
+        else if(keys[controls[i].down]) dirY=1;
+        else if(keys[controls[i].left]) dirX=-1;
+        else if(keys[controls[i].right]) dirX=1;
+        if(dirX||dirY){
+          bomb.holder=null;
+          bomb.x=p.x; bomb.y=p.y;
+          bomb.dir={x:dirX,y:dirY};
+          p.hasBomb=false;
+        }
+      }
     }
-  }
-  // Bomb flight
-  if(bomb.flying){
-    bomb.x+=bomb.vx;
-    bomb.y+=bomb.vy;
-    let gx=Math.floor(bomb.x/tileSize);
-    let gy=Math.floor(bomb.y/tileSize);
-    if(map[gy] && map[gy][gx]===1){ // hit wall -> stop
-      bomb.flying=false;
-      bomb.holder=Math.floor(Math.random()*numPlayers); // bounce back to random
-    }
-    ctx.drawImage(playerImgs[0].bomb,bomb.x,bomb.y,tileSize,tileSize); // reuse sprite for bomb
-    // Check collision with players
-    for(let i=0;i<numPlayers;i++){
-      let p=players[i];
-      if(!p.alive) continue;
-      if(Math.abs(p.x-bomb.x)<tileSize/2 && Math.abs(p.y-bomb.y)<tileSize/2){
-        bomb.flying=false;
-        bomb.holder=i;
+  });
+
+  // --- Bomb travel ---
+  if(bomb && !bomb.holder && bomb.dir){
+    let nx=bomb.x+bomb.dir.x, ny=bomb.y+bomb.dir.y;
+    if(nx<0||ny<0||nx>=mapSize||ny>=mapSize || grid[ny][nx]===1){
+      bomb.dir=null;
+    }else{
+      let hit=players.find(pl=>pl.alive && pl.x===nx && pl.y===ny);
+      if(hit){
+        hit.hasBomb=true; bomb.holder=hit; bomb.dir=null;
+      }else{
+        bomb.x=nx; bomb.y=ny;
       }
     }
   }
-  // Timer
-  ctx.fillStyle="white";
-  ctx.font="20px 'Press Start 2P'";
-  ctx.fillText("TIME: "+Math.floor(timeLeft),20,30);
-}
 
-// Countdown
-setInterval(()=>{
-  if(gameRunning){
-    timeLeft--;
-    if(timeLeft<=0){
-      if(bomb.holder!==null) players[bomb.holder].alive=false;
-      let alivePlayers=players.filter(p=>p.alive);
-      if(alivePlayers.length<=1){
-        endGame();
-      } else {
-        timeLeft=20;
-      }
+  // --- Timer ---
+  timeLeft-=(1/60);
+  if(timeLeft<=0){
+    if(bomb){
+      if(bomb.holder){ bomb.holder.alive=false; }
+      bomb=null;
+    }
+    let alive=players.filter(p=>p.alive);
+    if(alive.length<=1){
+      gameRunning=false;
+      document.getElementById("winnerText").textContent=alive.length?`Player ${alive[0].id} Wins!`:"No one wins";
+      document.getElementById("gameover").style.display="flex";
+    }else{
+      timeLeft=startTime; giveBomb();
     }
   }
-},1000);
 
-function endGame(){
-  gameRunning=false;
-  clearInterval(gameInterval);
-  document.getElementById("gameover").style.display="flex";
-  let winnerIndex=players.findIndex(p=>p.alive);
-  document.getElementById("winnerText").innerText=(winnerIndex>=0?("Player "+(winnerIndex+1)+" Wins!"):("Draw!"));
+  // --- Camera ---
+  let alivePlayers=players.filter(p=>p.alive);
+  if(alivePlayers.length>0){
+    let minX=Math.min(...alivePlayers.map(p=>p.x));
+    let maxX=Math.max(...alivePlayers.map(p=>p.x));
+    let minY=Math.min(...alivePlayers.map(p=>p.y));
+    let maxY=Math.max(...alivePlayers.map(p=>p.y));
+    let boxWidth=maxX-minX+1, boxHeight=maxY-minY+1;
+
+    let baseTile = canvas.width/mapSize; // max zoom-in
+    let fitTileX = canvas.width/boxWidth;
+    let fitTileY = canvas.height/boxHeight;
+    let targetZoom = Math.min(fitTileX, fitTileY);
+    if(targetZoom>baseTile) targetZoom=baseTile;
+
+    let centerX=(minX+maxX+1)/2;
+    let centerY=(minY+maxY+1)/2;
+
+    // Smooth zoom & pan
+    camZoom=lerp(camZoom,targetZoom,0.1);
+    camX=lerp(camX,centerX-(canvas.width/(2*camZoom)),0.1);
+    camY=lerp(camY,centerY-(canvas.height/(2*camZoom)),0.1);
+
+    // --- Draw ---
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for(let y=0;y<mapSize;y++){
+      for(let x=0;x<mapSize;x++){
+        let dx=(x-camX)*camZoom;
+        let dy=(y-camY)*camZoom;
+        if(dx+camZoom<0||dy+camZoom<0||dx>canvas.width||dy>canvas.height) continue;
+        ctx.drawImage(grid[y][x]===1?wallImg:groundImg,dx,dy,camZoom,camZoom);
+      }
+    }
+    players.forEach(p=>{
+      if(p.alive){
+        let img=p.hasBomb?playerImgs[p.id+"b"]:playerImgs[p.id];
+        let dx=(p.x-camX)*camZoom;
+        let dy=(p.y-camY)*camZoom;
+        ctx.drawImage(img,dx,dy,camZoom,camZoom);
+      }
+    });
+    if(bomb && !bomb.holder){
+      let dx=(bomb.x-camX)*camZoom;
+      let dy=(bomb.y-camY)*camZoom;
+      ctx.drawImage(bombImg,dx,dy,camZoom,camZoom);
+    }
+    ctx.fillStyle="white"; 
+    ctx.font=`${canvas.width/20}px 'Press Start 2P'`;
+    ctx.fillText(Math.ceil(timeLeft),10,30);
+  }
+
+  requestAnimationFrame(update);
 }
+
+// --- UI ---
+document.getElementById("menu").style.display="flex";
+document.getElementById("btn2").onclick=()=>{numPlayers=2;document.getElementById("menu").style.display="none";document.getElementById("settings").style.display="flex";};
+document.getElementById("btn3").onclick=()=>{numPlayers=3;document.getElementById("menu").style.display="none";document.getElementById("settings").style.display="flex";};
+document.getElementById("btn4").onclick=()=>{numPlayers=4;document.getElementById("menu").style.display="none";document.getElementById("settings").style.display="flex";};
+
+document.getElementById("timeInput").addEventListener("input",()=>{
+  let v=+document.getElementById("timeInput").value;
+  let btn=document.getElementById("startBtn");
+  if(v<5||v>60){ btn.querySelector("img").src="images/buttons/start-gray.png"; btn.disabled=true; }
+  else { btn.querySelector("img").src="images/buttons/start.png"; btn.disabled=false; }
+});
+
+document.getElementById("startBtn").onclick=()=>{
+  let v=+document.getElementById("timeInput").value;
+  if(v<5||v>60) return;
+  startTime=v; timeLeft=v;
+  document.getElementById("settings").style.display="none";
+  generateMap(); spawnPlayers(); giveBomb();
+  gameRunning=true;
+  update();
+};
+
+window.addEventListener("keydown",e=>{keys[e.code]=true;});
+window.addEventListener("keyup",e=>{keys[e.code]=false;});
 </script>
 </body>
 </html>
