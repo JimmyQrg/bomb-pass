@@ -85,6 +85,7 @@ const ctx = canvas.getContext("2d");
 let gameInterval, timerInterval;
 let players = [];
 let bomb = null;
+let bombFlying = null;
 let gameTime = 30;
 let totalPlayers = 2;
 const tileSize = 32;
@@ -92,6 +93,7 @@ const mapWidth = 20;
 const mapHeight = 15;
 let map = [];
 
+// Controls with throw keys: Q(1), /(2), U(3), R(4)
 const controls = [
   {up:'KeyW', down:'KeyS', left:'KeyA', right:'KeyD', throw:'KeyQ'},
   {up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight', throw:'Slash'},
@@ -122,7 +124,6 @@ function validateTime(){
     startBtn.onclick=null;
   }
 }
-
 timeInput.addEventListener("input", validateTime);
 
 function generateMap(){
@@ -140,6 +141,7 @@ function generateMap(){
   }
 }
 
+// Find nearest free tile if spawn inside wall
 function findFreeTile() {
   for(let y=1;y<mapHeight-1;y++){
     for(let x=1;x<mapWidth-1;x++){
@@ -159,28 +161,25 @@ function startGame(){
   players=[];
   for(let i=0;i<totalPlayers;i++){
     let spawn = {x:tileSize*(2+i*3), y:tileSize*2};
-    // Check wall
     if(!canMove(spawn.x, spawn.y, 28, 28)){
       spawn = findFreeTile();
     }
     players.push({
-      x:spawn.x,
-      y:spawn.y,
-      w:28, h:28,
+      x:spawn.x, y:spawn.y, w:28, h:28,
       color:`hsl(${i*90},80%,60%)`,
-      alive:true, hasBomb:false,
-      ctrl:controls[i]
+      alive:true, hasBomb:false, ctrl:controls[i]
     });
   }
   bomb = {holder:Math.floor(Math.random()*totalPlayers)};
   players[bomb.holder].hasBomb=true;
+  bombFlying = null;
 
   startTimer();
   gameInterval = setInterval(updateGame, 1000/60);
 }
 
 function startTimer(){
-  let timeLeft = gameTime;
+  let timeLeft = parseInt(timeInput.value);
   document.getElementById("timer").innerText=timeLeft;
   timerInterval=setInterval(()=>{
     timeLeft--;
@@ -196,6 +195,7 @@ function explodeBomb(){
   let loser = bomb.holder;
   players[loser].alive=false;
   players[loser].hasBomb=false;
+  bombFlying = null;
   let alivePlayers = players.filter(p=>p.alive);
   if(alivePlayers.length===1){
     endGame(alivePlayers[0]);
@@ -261,20 +261,47 @@ function updateGame(){
     ctx.fillStyle=p.color;
     ctx.fillRect(p.x,p.y,p.w,p.h);
 
-    // Bomb throw: transfer if another player is close
-    if(p.hasBomb && keys[p.ctrl.throw]){
-      players.forEach((target,j)=>{
-        if(i!==j && target.alive &&
-          Math.abs(target.x-p.x)<32 && Math.abs(target.y-p.y)<32){
-          target.hasBomb=true;
-          p.hasBomb=false;
-          bomb.holder=j;
+    // Bomb throw
+    if(p.hasBomb && keys[p.ctrl.throw] && !bombFlying){
+      // Find nearest player
+      let nearest = null;
+      let dist = Infinity;
+      players.forEach((t,j)=>{
+        if(i!==j && t.alive){
+          let d = Math.hypot(t.x - p.x, t.y - p.y);
+          if(d<dist){ dist=d; nearest=t; }
         }
       });
+      if(nearest){
+        bombFlying = {
+          x: p.x, y: p.y-10, target: nearest, speed: 6, from: p
+        };
+        p.hasBomb = false;
+        bomb.holder = null;
+      }
     }
   });
 
-  if(bomb && players[bomb.holder]){
+  // Bomb flying update
+  if(bombFlying){
+    let dx = bombFlying.target.x - bombFlying.x;
+    let dy = bombFlying.target.y - bombFlying.y;
+    let dist = Math.hypot(dx, dy);
+    if(dist < 4){
+      bombFlying.target.hasBomb = true;
+      bombFlying = null;
+      bomb.holder = players.indexOf(bombFlying.target);
+    } else {
+      bombFlying.x += dx/dist * bombFlying.speed;
+      bombFlying.y += dy/dist * bombFlying.speed;
+    }
+    let img=new Image();
+    img.src="images/bomb.png";
+    ctx.drawImage(img,bombFlying.x,bombFlying.y,24,24);
+  }
+
+  // Bomb holder display
+  if(bomb && bomb.holder!==null){
     let holder=players[bomb.holder];
     let img=new Image();
     img.src="images/bomb.png";
