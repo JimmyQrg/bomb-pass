@@ -1,389 +1,242 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<title>Bomb Pass</title>
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-<style>
-html,body{
-  margin:0; padding:0; height:100%; width:100%;
-  font-family: 'Press Start 2P', monospace;
-  background: url("images/background.png") center/cover no-repeat;
-  overflow: hidden;
-}
-#gameCanvas{
-  display:block;
-  margin:0 auto;
-  image-rendering: pixelated;
-  background: transparent;
-}
-.ui{
-  position:absolute; top:50%; left:50%;
-  transform: translate(-50%,-50%);
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:2px;
-}
-.button-img{
-  transform: scale(0.5);
-  image-rendering: pixelated;
-  cursor:pointer;
-  display:block;
-}
-input[type="number"]{
-  font-family:'Press Start 2P';
-  width:60px; font-size:12px;
-  text-align:center; margin-left:4px;
-}
-</style>
+  <meta charset="UTF-8">
+  <title>Bomb Pass</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: black;
+      font-family: 'Press Start 2P', cursive;
+      color: white;
+    }
+    canvas {
+      display: block;
+      margin: auto;
+      image-rendering: pixelated;
+    }
+    #ui {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      font-size: 14px;
+    }
+    .btn {
+      font-family: 'Press Start 2P', cursive;
+      background: #222;
+      color: #fff;
+      border: 2px solid #fff;
+      padding: 6px 10px;
+      margin: 2px;
+      cursor: pointer;
+    }
+    #playerSelect {
+      position: absolute;
+      top: 30%;
+      width: 100%;
+      text-align: center;
+    }
+    #playerSelect h1 {
+      font-size: 20px;
+      margin-bottom: 20px;
+    }
+    #timeSelect {
+      position: absolute;
+      bottom: 20px;
+      width: 100%;
+      text-align: center;
+      font-size: 12px;
+    }
+    input[type=number] {
+      width: 80px;
+      font-family: 'Press Start 2P';
+      font-size: 12px;
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
-<canvas id="gameCanvas"></canvas>
+<div id="ui"></div>
 
-<div id="menu" class="ui">
-  <img id="btn2" class="button-img" src="images/buttons/start-menu/button-2-players.png">
-  <img id="btn3" class="button-img" src="images/buttons/start-menu/button-3-players.png">
-  <img id="btn4" class="button-img" src="images/buttons/start-menu/button-4-players.png">
-</div>
-
-<div id="settings" class="ui" style="display:none;">
-  <div style="color:white; display:flex; align-items:center;">
-    TIME: 
-    <input id="timeInput" type="number" min="5" max="60" value="20">
-    s
+<div id="playerSelect">
+  <h1>BOMB PASS</h1>
+  <p>Select number of players:</p>
+  <button class="btn" onclick="startGame(2)">2</button>
+  <button class="btn" onclick="startGame(3)">3</button>
+  <button class="btn" onclick="startGame(4)">4</button>
+  <div id="timeSelect">
+    <p>Set round time (5s–60s):</p>
+    <input id="timeInput" type="number" value="20" min="5" max="60"> seconds
   </div>
-  <img id="startBtn" class="button-img" src="images/buttons/start-gray.png">
 </div>
 
-<div id="gameover" class="ui" style="display:none;">
-  <div id="winnerText" style="color:white; text-align:center;"></div>
-  <img id="restartBtn" class="button-img" src="images/buttons/restart.png">
-</div>
+<canvas id="game" width="800" height="600"></canvas>
 
 <script>
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const menu = document.getElementById('menu');
-const settings = document.getElementById('settings');
-const gameover = document.getElementById('gameover');
-const btn2 = document.getElementById('btn2');
-const btn3 = document.getElementById('btn3');
-const btn4 = document.getElementById('btn4');
-const startBtn = document.getElementById('startBtn');
-const timeInput = document.getElementById('timeInput');
-const restartBtn = document.getElementById('restartBtn');
-const winnerText = document.getElementById('winnerText');
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
 
-const BASE_TILE_PX=48;
-let MAP_TILES=80;
-let camTileSize=BASE_TILE_PX;
-let camX=0,camY=0;
+let players = [];
+let bombs = [];
+let gameRunning = false;
+let roundTime = 20;
+let camera = { x:0, y:0, width:canvas.width, height:canvas.height };
+let mapSize = 2000;
 
-let keys={},prevKeys={};
-window.addEventListener('keydown',e=>keys[e.code]=true);
-window.addEventListener('keyup',e=>keys[e.code]=false);
-
-let grid=[],players=[],bomb=null,particles=[],trails=[];
-let numPlayers=2,startTime=20,timeLeft=20,running=false;
-
-const imgWall=new Image(); imgWall.src='images/blocks/wall.png';
-const imgGround=new Image(); imgGround.src='images/blocks/ground-slab.png';
-const imgBomb=new Image(); imgBomb.src='images/bomb.png';
-const playerImgs={};
-for(let i=1;i<=4;i++){
-  playerImgs['p'+i]=new Image(); playerImgs['p'+i].src=`images/players/player-${i}.png`;
-  playerImgs['pb'+i]=new Image(); playerImgs['pb'+i].src=`images/players/player-${i}-bomb.png`;
-}
-
-const controls=[
-  {up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD',throw:'KeyQ'},
-  {up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',throw:'Slash'},
-  {up:'KeyI',down:'KeyK',left:'KeyJ',right:'KeyL',throw:'KeyY'},
-  {up:'KeyT',down:'KeyG',left:'KeyF',right:'KeyH',throw:'KeyR'}
-];
-
-const playerColors=['rgba(255,120,120,','rgba(120,255,140,','rgba(120,160,255,','rgba(255,255,120,'];
-
-function lerp(a,b,t){return a+(b-a)*t;}
-function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
-function rand(min,max){return Math.random()*(max-min)+min;}
-
-function resizeCanvas(){
-  canvas.width=window.innerWidth;
-  canvas.height=window.innerHeight;
-}
-window.addEventListener('resize',resizeCanvas);
-resizeCanvas();
-
-function generateMap(){
-  grid=[];
-  for(let y=0;y<MAP_TILES;y++){
-    const row=[];
-    for(let x=0;x<MAP_TILES;x++){
-      if(x===0||y===0||x===MAP_TILES-1||y===MAP_TILES-1||Math.random()<0.15) row.push(1);
-      else row.push(0);
+class Player {
+  constructor(x, y, color, keys, throwKey) {
+    this.x = x;
+    this.y = y;
+    this.color = color;
+    this.keys = keys;
+    this.throwKey = throwKey;
+    this.width = 20;
+    this.height = 20;
+    this.speed = 3;
+    this.hasBomb = false;
+    this.trail = [];
+    this.alive = true;
+  }
+  update() {
+    if(!this.alive) return;
+    let vx=0, vy=0;
+    if(keys[this.keys.left]) vx=-1;
+    if(keys[this.keys.right]) vx=1;
+    if(keys[this.keys.up]) vy=-1;
+    if(keys[this.keys.down]) vy=1;
+    if(this.hasBomb) {
+      this.speed = 4.2; // faster with bomb
+    } else {
+      this.speed = 3;
     }
-    grid.push(row);
-  }
-}
+    this.x += vx*this.speed;
+    this.y += vy*this.speed;
 
-function spawnPlayers(){
-  players=[];trails=[];
-  for(let i=0;i<numPlayers;i++){
-    let tx,ty;
-    do{ tx=Math.floor(Math.random()*MAP_TILES); ty=Math.floor(Math.random()*MAP_TILES);}
-    while(grid[ty][tx]===1 || players.some(p=>p.tileX===tx&&p.tileY===ty));
-    const px=tx*BASE_TILE_PX+(BASE_TILE_PX*0.05);
-    const py=ty*BASE_TILE_PX+(BASE_TILE_PX*0.05);
-    players.push({id:i+1,x:px,y:py,tileX:tx,tileY:ty,alive:true,hasBomb:false,lastDirX:1,lastDirY:0});
-    trails.push([]);
-  }
-}
+    // Keep in map
+    this.x = Math.max(0, Math.min(mapSize-this.width, this.x));
+    this.y = Math.max(0, Math.min(mapSize-this.height, this.y));
 
-function giveBomb(){
-  const alive=players.filter(p=>p.alive);
-  if(alive.length===0){bomb=null;return;}
-  const pick=alive[Math.floor(Math.random()*alive.length)];
-  pick.hasBomb=true;
-  bomb={x:pick.x+BASE_TILE_PX*0.2,y:pick.y+BASE_TILE_PX*0.2,vx:0,vy:0,isFlying:false,holderIndex:players.indexOf(pick),fromIndex:null};
-}
+    // Trail
+    this.trail.push({x:this.x,y:this.y});
+    if(this.trail.length>15) this.trail.shift();
 
-function rectHitsWall(px,py,w,h){
-  const left=Math.floor(px/BASE_TILE_PX),right=Math.floor((px+w-1)/BASE_TILE_PX);
-  const top=Math.floor(py/BASE_TILE_PX),bottom=Math.floor((py+h-1)/BASE_TILE_PX);
-  for(let ty=top;ty<=bottom;ty++){
-    if(ty<0||ty>=MAP_TILES) return true;
-    for(let tx=left;tx<=right;tx++){
-      if(tx<0||tx>=MAP_TILES) return true;
-      if(grid[ty][tx]===1) return true;
+    // Throw
+    if(keys[this.throwKey]) {
+      this.throwBomb();
+      keys[this.throwKey] = false;
     }
   }
-  return false;
-}
-
-function rectHitsPlayer(px,py,w,h,excludeIndex=-1){
-  for(let i=0;i<players.length;i++){
-    if(i===excludeIndex) continue;
-    const p=players[i];
-    if(!p.alive) continue;
-    if(px<p.x+BASE_TILE_PX*0.9 && px+w>p.x && py<p.y+BASE_TILE_PX*0.9 && py+h>p.y) return i;
-  }
-  return -1;
-}
-
-function spawnExplosion(px,py){
-  const count=24;
-  for(let i=0;i<count;i++){
-    const angle=Math.random()*Math.PI*2;
-    const speed=rand(2,7);
-    particles.push({x:px+rand(-8,8),y:py+rand(-8,8),vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,age:0,life:rand(25,45),color:`rgba(255,${Math.floor(rand(120,240))},0,`});
-  }
-}
-
-function explodeAt(px,py){
-  spawnExplosion(px,py);
-  const radius=BASE_TILE_PX*0.9;
-  players.forEach(p=>{
-    if(!p.alive) return;
-    const cx=p.x+BASE_TILE_PX*0.45,cy=p.y+BASE_TILE_PX*0.45;
-    if(Math.hypot(cx-px,cy-py)<radius){p.alive=false;p.hasBomb=false;}
-  });
-}
-
-let tickTimer=null;
-function startRoundTimer(){
-  if(tickTimer) clearInterval(tickTimer);
-  tickTimer=setInterval(()=>{
-    timeLeft=Math.max(0,timeLeft-1);
-    if(timeLeft<=0){
-      if(bomb){
-        if(bomb.holderIndex!==null){
-          const h=players[bomb.holderIndex];
-          if(h && h.alive){explodeAt(h.x+BASE_TILE_PX*0.45,h.y+BASE_TILE_PX*0.45);h.alive=false;}
-        }else explodeAt(bomb.x+BASE_TILE_PX*0.3,bomb.y+BASE_TILE_PX*0.3);
-        bomb=null;
-      }
-      const alive=players.filter(p=>p.alive);
-      if(alive.length<=1){running=false;clearInterval(tickTimer);gameover.style.display='flex';winnerText.textContent=alive.length===1?`Player ${alive[0].id} Wins!`:'No one wins';}
-      else{timeLeft=startTime;giveBomb();}
+  throwBomb() {
+    if(this.hasBomb) {
+      bombs.push(new Bomb(this.x,this.y, this));
+      this.hasBomb=false;
     }
-  },1000);
+  }
+  draw() {
+    if(!this.alive) return;
+    // Trail glow
+    for(let i=0;i<this.trail.length;i++) {
+      let t=this.trail[i];
+      ctx.fillStyle=`rgba(255,255,255,${i/this.trail.length})`;
+      ctx.fillRect(t.x-camera.x, t.y-camera.y, this.width, this.height);
+    }
+    ctx.fillStyle=this.color;
+    ctx.fillRect(this.x-camera.x,this.y-camera.y,this.width,this.height);
+    if(this.hasBomb) {
+      ctx.strokeStyle="yellow";
+      ctx.lineWidth=2;
+      ctx.strokeRect(this.x-camera.x,this.y-camera.y,this.width,this.height);
+    }
+  }
 }
 
-function isNewPress(code){return !!keys[code]&&!prevKeys[code];}
-
-let PLAYER_SPEED=7,BOMB_SPEED=25;
-
-function update(){
-  if(!running) return;
-  for(let i=0;i<players.length;i++){
-    const p=players[i];
-    if(!p.alive) continue;
-    trails[i].unshift({x:p.x+BASE_TILE_PX*0.45,y:p.y+BASE_TILE_PX*0.45,age:0});
-    if(trails[i].length>16) trails[i].pop();
+class Bomb {
+  constructor(x,y,owner) {
+    this.x=x;
+    this.y=y;
+    this.owner=owner;
+    this.size=10;
+    this.vx=(Math.random()-0.5)*6;
+    this.vy=(Math.random()-0.5)*6;
+    this.active=true;
   }
-
-  for(let i=0;i<players.length;i++){
-    const p=players[i];
-    if(!p.alive) continue;
-    const c=controls[i]; let dx=0,dy=0;
-    if(keys[c.up]) dy-=PLAYER_SPEED;
-    if(keys[c.down]) dy+=PLAYER_SPEED;
-    if(keys[c.left]) dx-=PLAYER_SPEED;
-    if(keys[c.right]) dx+=PLAYER_SPEED;
-    if(dx!==0||dy!==0){p.lastDirX=dx; p.lastDirY=dy;}
-    let nx=p.x+dx,ny=p.y+dy;
-    if(!rectHitsWall(nx,ny,BASE_TILE_PX*0.9,BASE_TILE_PX*0.9)){p.x=nx;p.y=ny;}
-  }
-
-  // bomb throw
-  if(bomb && !bomb.isFlying){
-    const holder=players[bomb.holderIndex];
-    if(holder && holder.alive){
-      const c=controls[holder.id-1];
-      if(isNewPress(c.throw)){
-        bomb.isFlying=true;
-        bomb.vx=holder.lastDirX/Math.hypot(holder.lastDirX||1,holder.lastDirY||1)*BOMB_SPEED;
-        bomb.vy=holder.lastDirY/Math.hypot(holder.lastDirX||1,holder.lastDirY||1)*BOMB_SPEED;
-        bomb.fromIndex=bomb.holderIndex;
-        bomb.holderIndex=null;
-      }else{
-        bomb.x=holder.x+BASE_TILE_PX*0.2;
-        bomb.y=holder.y+BASE_TILE_PX*0.2;
+  update() {
+    this.x+=this.vx;
+    this.y+=this.vy;
+    if(this.x<0||this.x>mapSize||this.y<0||this.y>mapSize) this.active=false;
+    // collision
+    for(let p of players){
+      if(p.alive && !p.hasBomb && this.active &&
+        this.x>p.x && this.x<p.x+p.width &&
+        this.y>p.y && this.y<p.y+p.height){
+        p.hasBomb=true;
+        this.active=false;
       }
     }
   }
-
-  // bomb flying
-  if(bomb && bomb.isFlying){
-    let nx=bomb.x+bomb.vx;
-    let ny=bomb.y+bomb.vy;
-    if(rectHitsWall(nx,ny,BASE_TILE_PX*0.6,BASE_TILE_PX*0.6)){
-      // return to thrower
-      const from=players[bomb.fromIndex];
-      if(from && from.alive){bomb.isFlying=false;bomb.holderIndex=bomb.fromIndex;}
-      else bomb.isFlying=false;bomb.holderIndex=null;
-    }else{
-      const hitPlayer=rectHitsPlayer(nx,ny,BASE_TILE_PX*0.6,BASE_TILE_PX*0.6);
-      if(hitPlayer!==-1){
-        bomb.isFlying=false;
-        bomb.holderIndex=hitPlayer;
-      }else{bomb.x=nx;bomb.y=ny;}
-    }
+  draw() {
+    if(!this.active) return;
+    ctx.fillStyle="orange";
+    ctx.fillRect(this.x-camera.x,this.y-camera.y,this.size,this.size);
   }
-
-  // particles
-  for(let i=particles.length-1;i>=0;i--){
-    const p=particles[i];
-    p.x+=p.vx;p.y+=p.vy;p.age++;
-    if(p.age>p.life) particles.splice(i,1);
-  }
-
-  prevKeys={...keys};
-
-  updateCamera();
 }
 
-function updateCamera(){
-  // find bounding rect for alive players
-  const alive=players.filter(p=>p.alive);
-  if(alive.length===0) return;
-  let minX=Math.min(...alive.map(p=>p.x)),maxX=Math.max(...alive.map(p=>p.x+BASE_TILE_PX*0.9));
-  let minY=Math.min(...alive.map(p=>p.y)),maxY=Math.max(...alive.map(p=>p.y+BASE_TILE_PX*0.9));
-  const margin=BASE_TILE_PX*2;
-  minX-=margin; maxX+=margin; minY-=margin; maxY+=margin;
-  const scaleX=canvas.width/(maxX-minX),scaleY=canvas.height/(maxY-minY);
-  camTileSize=BASE_TILE_PX*Math.min(scaleX,scaleY,1);
-  camX=minX-(canvas.width-camTileSize*(maxX-minX)/BASE_TILE_PX)/2;
-  camY=minY-(canvas.height-camTileSize*(maxY-minY)/BASE_TILE_PX)/2;
-  camX=clamp(camX,0,MAP_TILES*BASE_TILE_PX-canvas.width);
-  camY=clamp(camY,0,MAP_TILES*BASE_TILE_PX-canvas.height);
+let keys={};
+window.addEventListener("keydown",e=>keys[e.key]=true);
+window.addEventListener("keyup",e=>keys[e.key]=false);
+
+function startGame(n) {
+  roundTime = Math.min(60, Math.max(5, parseInt(document.getElementById("timeInput").value)||20));
+  document.getElementById("playerSelect").style.display="none";
+  gameRunning=true;
+  players=[];
+  let startPos=[
+    [100,100],[mapSize-120,100],[100,mapSize-120],[mapSize-120,mapSize-120]
+  ];
+  let colors=["red","blue","green","purple"];
+  let keysets=[
+    {up:"w",down:"s",left:"a",right:"d"},
+    {up:"ArrowUp",down:"ArrowDown",left:"ArrowLeft",right:"ArrowRight"},
+    {up:"i",down:"k",left:"j",right:"l"},
+    {up:"t",down:"g",left:"f",right:"h"},
+  ];
+  let throws=["q","/","y","r"];
+  for(let i=0;i<n;i++){
+    players.push(new Player(startPos[i][0],startPos[i][1],colors[i],keysets[i],throws[i]));
+  }
+  players[0].hasBomb=true;
+  loop();
 }
 
-function draw(){
+function updateCamera() {
+  // follow first alive player
+  let p=players.find(pl=>pl.alive);
+  if(!p) return;
+  camera.x=p.x-canvas.width/2;
+  camera.y=p.y-canvas.height/2;
+  camera.x=Math.max(0,Math.min(mapSize-canvas.width,camera.x));
+  camera.y=Math.max(0,Math.min(mapSize-canvas.height,camera.y));
+}
+
+function loop() {
+  if(!gameRunning) return;
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  // draw map
-  for(let y=0;y<MAP_TILES;y++){
-    for(let x=0;x<MAP_TILES;x++){
-      const sx=x*camTileSize,sy=y*camTileSize;
-      const img=grid[y][x]===1?imgWall:imgGround;
-      ctx.drawImage(img,sx-camX,sy-camY,camTileSize,camTileSize);
-    }
-  }
-
-  // draw trails
-  for(let i=0;i<trails.length;i++){
-    ctx.strokeStyle=playerColors[i]+'0.4)';
-    ctx.lineWidth=3;
-    ctx.beginPath();
-    const t=trails[i];
-    for(let j=0;j<t.length;j++){
-      const tp=t[j];
-      if(j===0) ctx.moveTo(tp.x-camX,tp.y-camY);
-      else ctx.lineTo(tp.x-camX,tp.y-camY);
-    }
-    ctx.stroke();
-  }
-
-  // draw bomb
-  if(bomb){
-    const bImg=bomb.holderIndex!==null?playerImgs['pb'+(bomb.holderIndex+1)]:imgBomb;
-    ctx.drawImage(bImg,bomb.x-camX,bomb.y-camY,BASE_TILE_PX*0.9,BASE_TILE_PX*0.9);
-  }
-
-  // draw players
-  for(let p of players){
-    if(!p.alive) continue;
-    const img=p.hasBomb?playerImgs['pb'+p.id]:playerImgs['p'+p.id];
-    ctx.drawImage(img,p.x-camX,p.y-camY,BASE_TILE_PX*0.9,BASE_TILE_PX*0.9);
-  }
-
-  // draw particles
-  for(let part of particles){
-    ctx.fillStyle=part.color+(1-part.age/part.life)+')';
-    ctx.fillRect(part.x-camX,part.y-camY,2,2);
-  }
-
-  // draw timer
-  ctx.fillStyle='white';
-  ctx.font='20px "Press Start 2P"';
-  ctx.fillText('TIME: '+timeLeft,10,30);
-
-  requestAnimationFrame(draw);
+  // Background
+  ctx.fillStyle="#111";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  // Update
+  players.forEach(p=>p.update());
+  bombs.forEach(b=>b.update());
+  bombs=bombs.filter(b=>b.active);
+  updateCamera();
+  // Draw
+  players.forEach(p=>p.draw());
+  bombs.forEach(b=>b.draw());
+  requestAnimationFrame(loop);
 }
-
-function startGame(){
-  menu.style.display='none';
-  settings.style.display='none';
-  gameover.style.display='none';
-  running=true;
-  generateMap();
-  spawnPlayers();
-  giveBomb();
-  timeLeft=startTime;
-  startRoundTimer();
-  draw();
-}
-
-btn2.onclick=()=>{numPlayers=2;menu.style.display='none';settings.style.display='flex';};
-btn3.onclick=()=>{numPlayers=3;menu.style.display='none';settings.style.display='flex';};
-btn4.onclick=()=>{numPlayers=4;menu.style.display='none';settings.style.display='flex';};
-
-function updateStartBtn(){
-  const t=parseInt(timeInput.value);
-  if(t>=5 && t<=60){startBtn.src='images/buttons/start.png'; startBtn.onclick=startGame;}
-  else{startBtn.src='images/buttons/start-gray.png'; startBtn.onclick=null;}
-}
-timeInput.addEventListener('input',()=>{
-  startTime=parseInt(timeInput.value);
-  timeLeft=startTime;
-  updateStartBtn();
-});
-updateStartBtn();
-
-restartBtn.onclick=()=>{menu.style.display='flex';gameover.style.display='none';};
-
 </script>
 </body>
 </html>
