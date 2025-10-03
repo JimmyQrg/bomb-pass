@@ -7,12 +7,14 @@
 <style>
 body { margin:0; background:black; display:flex; justify-content:center; align-items:center; height:100vh; }
 canvas { image-rendering: pixelated; background:#000; }
+
 #menu, #settings, #gameover {
   position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
   display:none; flex-direction:column; align-items:center;
   font-family:'Press Start 2P', monospace; background:url("images/background.png") center/cover no-repeat;
   padding:20px; border:4px solid #444;
 }
+#menu button img, #settings button img, #gameover button img { transform:scale(0.5); } /* buttons 2x smaller */
 #menu button, #settings button { background:none; border:none; margin:10px; cursor:pointer; }
 </style>
 </head>
@@ -41,6 +43,7 @@ const ctx=canvas.getContext("2d");
 
 let mapSize=40, grid=[], players=[], bomb=null, explosions=[], gameRunning=false, timeLeft=0, startTime=20, numPlayers=2;
 let camX=0, camY=0, camZoom=1;
+let moveCounter=0; // slower movement
 
 // Resize canvas
 function resizeCanvas(){
@@ -54,7 +57,7 @@ resizeCanvas();
 const wallImg=new Image(); wallImg.src="images/blocks/wall.png";
 const groundImg=new Image(); groundImg.src="images/blocks/ground-slab.png";
 const bombImg=new Image(); bombImg.src="images/bomb.png";
-const explosionImg=new Image(); explosionImg.src="images/bomb.png"; // can use bomb.png as placeholder
+const explosionImg=new Image(); explosionImg.src="images/bomb.png"; 
 let playerImgs={};
 for(let i=1;i<=4;i++){
   playerImgs[i]=new Image(); playerImgs[i].src=`images/players/player-${i}.png`;
@@ -117,7 +120,6 @@ function lerp(a,b,t){ return a + (b-a)*t; }
 // Explosion
 function explode(x,y){
   explosions.push({x,y,frame:0});
-  // check hit players
   players.forEach(p=>{
     if(p.alive && p.x===x && p.y===y){ p.alive=false; if(bomb && bomb.holder===p) bomb=null;}
   });
@@ -126,21 +128,25 @@ function explode(x,y){
 // Game loop
 function update(){
   if(!gameRunning) return;
+  moveCounter++;
+  let moveStep = moveCounter%6===0; // move every 6 frames
 
   // Movement
-  players.forEach((p,i)=>{
-    if(!p.alive) return;
-    let ctrl=controls[i];
-    let nx=p.x, ny=p.y;
-    if(keys[ctrl.up]) ny--;
-    if(keys[ctrl.down]) ny++;
-    if(keys[ctrl.left]) nx--;
-    if(keys[ctrl.right]) nx++;
-    if((nx!==p.x||ny!==p.y) && !isBlocked(nx,ny)){
-      p.x=nx; p.y=ny;
-      if(bomb && bomb.holder===p){ bomb.x=p.x; bomb.y=p.y; }
-    }
-  });
+  if(moveStep){
+    players.forEach((p,i)=>{
+      if(!p.alive) return;
+      let ctrl=controls[i];
+      let nx=p.x, ny=p.y;
+      if(keys[ctrl.up]) ny--;
+      if(keys[ctrl.down]) ny++;
+      if(keys[ctrl.left]) nx--;
+      if(keys[ctrl.right]) nx++;
+      if((nx!==p.x||ny!==p.y) && !isBlocked(nx,ny)){
+        p.x=nx; p.y=ny;
+        if(bomb && bomb.holder===p){ bomb.x=p.x; bomb.y=p.y; }
+      }
+    });
+  }
 
   // Throw
   players.forEach((p,i)=>{
@@ -181,7 +187,7 @@ function update(){
   explosions.forEach(e=>e.frame++);
   explosions = explosions.filter(e=>e.frame<15);
 
-  // Timer and check alive
+  // Check alive
   let alive=players.filter(p=>p.alive);
   if(alive.length<=1 && !bomb){
     gameRunning=false;
@@ -241,10 +247,10 @@ function update(){
     ctx.fillRect(dx,dy,camZoom,camZoom);
   });
 
-  // Timer
+  // Timer top-left
   ctx.fillStyle="white"; 
-  ctx.font=`${canvas.width/20}px 'Press Start 2P'`;
-  ctx.fillText(Math.ceil(timeLeft),10,30);
+  ctx.font=`${canvas.width/25}px 'Press Start 2P'`;
+  ctx.fillText(Math.ceil(timeLeft),10,canvas.height-10);
 
   requestAnimationFrame(update);
 }
