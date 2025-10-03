@@ -1,285 +1,638 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8" />
 <title>Bomb Pass</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
-body { margin:0; background:black; display:flex; justify-content:center; align-items:center; height:100vh; }
-canvas { image-rendering: pixelated; background:#000; }
+  html,body{
+    height:100%;
+    margin:0;
+  }
+  /* background.png fills whole screen on lowest layer */
+  body{
+    background-image: url("images/background.png");
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family: 'Press Start 2P', monospace;
+    -webkit-font-smoothing: none;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-#menu, #settings, #gameover {
-  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-  display:none; flex-direction:column; align-items:center;
-  font-family:'Press Start 2P', monospace; background:url("images/background.png") center/cover no-repeat;
-  padding:20px; border:4px solid #444;
-}
-#menu button img, #settings button img, #gameover button img { transform:scale(0.5); } /* buttons 2x smaller */
-#menu button, #settings button { background:none; border:none; margin:10px; cursor:pointer; }
+  /* Square canvas centered (largest square that fits window) */
+  #gameCanvas{
+    image-rendering: pixelated;
+    background: #000; /* black borders visible around canvas */
+    display:block;
+    box-shadow: 0 0 0 6px rgba(0,0,0,0.6);
+  }
+
+  /* UI windows sit on top and are centered */
+  .ui {
+    position: absolute;
+    top:50%;
+    left:50%;
+    transform: translate(-50%,-50%);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:6px; /* buttons closer */
+    padding:18px;
+    border:4px solid #444;
+    background: rgba(0,0,0,0.25); /* semi see-through so background.png is visible */
+  }
+
+  .ui img.button-img {
+    transform: scale(0.5); /* buttons 2× smaller */
+    image-rendering: pixelated;
+    display:block;
+  }
+
+  .ui input[type="number"]{
+    font-family:'Press Start 2P';
+    width:80px;
+    text-align:center;
+    font-size:13px;
+    margin-left:8px;
+  }
+
+  #gameover { display:none; }
 </style>
 </head>
 <body>
-<canvas id="gameCanvas"></canvas>
+  <canvas id="gameCanvas"></canvas>
 
-<div id="menu">
-  <button id="btn2"><img src="images/buttons/start-menu/button-2-players.png"></button>
-  <button id="btn3"><img src="images/buttons/start-menu/button-3-players.png"></button>
-  <button id="btn4"><img src="images/buttons/start-menu/button-4-players.png"></button>
-</div>
+  <!-- Menu -->
+  <div id="menu" class="ui">
+    <img id="btn2" class="button-img" src="images/buttons/start-menu/button-2-players.png" alt="2 players">
+    <img id="btn3" class="button-img" src="images/buttons/start-menu/button-3-players.png" alt="3 players">
+    <img id="btn4" class="button-img" src="images/buttons/start-menu/button-4-players.png" alt="4 players">
+  </div>
 
-<div id="settings">
-  <label style="color:white;">Time (5–60s): <input id="timeInput" type="number" min="5" max="60" value="20"></label>
-  <button id="startBtn"><img src="images/buttons/start.png"></button>
-</div>
+  <!-- Settings -->
+  <div id="settings" class="ui" style="display:none;">
+    <div style="color:white">TIME (5–60s):
+      <input id="timeInput" type="number" min="5" max="60" value="20">
+    </div>
+    <img id="startBtn" class="button-img" src="images/buttons/start-gray.png" alt="Start">
+  </div>
 
-<div id="gameover">
-  <h1 id="winnerText" style="color:white;"></h1>
-  <button onclick="location.reload()"><img src="images/buttons/restart.png"></button>
-</div>
+  <!-- Game over -->
+  <div id="gameover" class="ui">
+    <div id="winnerText" style="color:white; text-align:center;"></div>
+    <img id="restartBtn" class="button-img" src="images/buttons/restart.png" alt="Restart">
+  </div>
 
 <script>
-const canvas=document.getElementById("gameCanvas");
-const ctx=canvas.getContext("2d");
+/* ---------- Config ---------- */
+const MAP_TILES = 40;               // 40x40 map
+const BASE_TILE_PX = 48;            // world tile pixel size (world coordinates use px; each tile = 48px)
+const PLAYER_DRAW_TILE_RATIO = 1.0; // draw players at 1 tile size by default (scaled by camera)
+const PLAYER_W = BASE_TILE_PX * 0.9; // player bounding-box (px)
+const PLAYER_H = BASE_TILE_PX * 0.9;
+const BOMB_SIZE_PX = BASE_TILE_PX * 0.6;
+const PLAYER_SPEED_PX = 3.5;        // pixels per frame (you asked faster)
+const BOMB_SPEED_PX = 9;            // pixels per frame for thrown bomb
+const CAMERA_SMOOTH = 0.10;         // lerp factor for camera movement & zoom
+const PARTICLE_COUNT = 16;
 
-let mapSize=40, grid=[], players=[], bomb=null, explosions=[], gameRunning=false, timeLeft=0, startTime=20, numPlayers=2;
-let camX=0, camY=0, camZoom=1;
-let moveCounter=0; // slower movement
+/* ---------- DOM ---------- */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const menu = document.getElementById('menu');
+const settings = document.getElementById('settings');
+const gameover = document.getElementById('gameover');
+const btn2 = document.getElementById('btn2');
+const btn3 = document.getElementById('btn3');
+const btn4 = document.getElementById('btn4');
+const startBtn = document.getElementById('startBtn');
+const startImg = document.getElementById('startBtn');
+const timeInput = document.getElementById('timeInput');
+const restartBtn = document.getElementById('restartBtn');
+const winnerText = document.getElementById('winnerText');
 
-// Resize canvas
-function resizeCanvas(){
-  let size=Math.min(window.innerWidth, window.innerHeight);
-  canvas.width=canvas.height=size;
+/* ---------- Images ---------- */
+const imgWall = new Image(); imgWall.src = 'images/blocks/wall.png';
+const imgGround = new Image(); imgGround.src = 'images/blocks/ground-slab.png';
+const imgBomb = new Image(); imgBomb.src = 'images/bomb.png';
+const playerImgs = {};
+for(let i=1;i<=4;i++){
+  playerImgs['p'+i] = new Image(); playerImgs['p'+i].src = `images/players/player-${i}.png`;
+  playerImgs['pb'+i] = new Image(); playerImgs['pb'+i].src = `images/players/player-${i}-bomb.png`;
 }
-window.addEventListener("resize", resizeCanvas);
+
+/* ---------- Input ---------- */
+let keys = {};        // current
+let prevKeys = {};    // previous frame (for rising-edge detection)
+window.addEventListener('keydown', e => { keys[e.code] = true; });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+/* ---------- Game state ---------- */
+let grid = []; // 2D tile array: 0 ground, 1 wall
+let players = []; // array of player objects {id,x,y,alive,hasBomb,lastDirX,lastDirY}
+let bomb = null;  // {x,y,vx,vy,isFlying,holderIndex,fromIndex}
+let particles = []; // explosion particles
+let numPlayers = 2;
+let startTime = 20;   // seconds for round (updated by settings)
+let timeLeft = 0;     // seconds left in the round
+let timerInterval = null;
+let running = false;
+
+/* ---------- Camera (in tile units) ---------- */
+let camX = 0; // top-left tile coordinate
+let camY = 0;
+let camTileSize = 0; // pixels per tile used for rendering (changes with zoom)
+
+/* ---------- Controls mapping (codes) ---------- */
+/* Throw keys: Q(1) -> KeyQ, /(2) -> Slash, U(3) -> KeyU, R(4) -> KeyR */
+const controls = [
+  { up:'KeyW', down:'KeyS', left:'KeyA', right:'KeyD', throw:'KeyQ' },
+  { up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight', throw:'Slash' },
+  { up:'KeyI', down:'KeyK', left:'KeyJ', right:'KeyL', throw:'KeyU' },
+  { up:'KeyT', down:'KeyG', left:'KeyF', right:'KeyH', throw:'KeyR' }
+];
+
+/* ---------- Utilities ---------- */
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+function lerp(a,b,t){ return a + (b-a) * t; }
+function rand(min,max){ return Math.random()*(max-min)+min; }
+
+/* ---------- Resize canvas (largest square inside window) ---------- */
+function resizeCanvas(){
+  const size = Math.min(window.innerWidth, window.innerHeight);
+  canvas.width = canvas.height = size;
+  // Recompute cam base tile later in render step
+}
+window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// Load images
-const wallImg=new Image(); wallImg.src="images/blocks/wall.png";
-const groundImg=new Image(); groundImg.src="images/blocks/ground-slab.png";
-const bombImg=new Image(); bombImg.src="images/bomb.png";
-const explosionImg=new Image(); explosionImg.src="images/bomb.png"; 
-let playerImgs={};
-for(let i=1;i<=4;i++){
-  playerImgs[i]=new Image(); playerImgs[i].src=`images/players/player-${i}.png`;
-  playerImgs[i+"b"]=new Image(); playerImgs[i+"b"].src=`images/players/player-${i}-bomb.png`;
-}
-
-// Controls
-const controls=[
-  {up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD',throw:'KeyQ'},
-  {up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',throw:'Slash'},
-  {up:'KeyI',down:'KeyK',left:'KeyJ',right:'KeyL',throw:'KeyU'},
-  {up:'KeyT',down:'KeyG',left:'KeyF',right:'KeyH',throw:'KeyR'},
-];
-let keys={};
-
-// Map generation
+/* ---------- Map generation ---------- */
 function generateMap(){
-  grid=[];
-  for(let y=0;y<mapSize;y++){
-    let row=[];
-    for(let x=0;x<mapSize;x++){
-      if(x===0||y===0||x===mapSize-1||y===mapSize-1||Math.random()<0.15) row.push(1);
+  grid = [];
+  for(let y=0;y<MAP_TILES;y++){
+    const row = [];
+    for(let x=0;x<MAP_TILES;x++){
+      if(x===0 || y===0 || x===MAP_TILES-1 || y===MAP_TILES-1 || Math.random() < 0.15) row.push(1);
       else row.push(0);
     }
     grid.push(row);
   }
 }
 
-// Spawn players avoiding walls
+/* ---------- Spawn players (pixel positions centered in tile) ---------- */
 function spawnPlayers(){
-  players=[];
+  players = [];
   for(let i=0;i<numPlayers;i++){
-    let x,y;
+    let tx, ty;
     do{
-      x=Math.floor(Math.random()*mapSize);
-      y=Math.floor(Math.random()*mapSize);
-    }while(grid[y][x]===1 || players.some(p=>p.x===x && p.y===y));
-    players.push({id:i+1,x,y,alive:true,hasBomb:false});
+      tx = Math.floor(Math.random()*MAP_TILES);
+      ty = Math.floor(Math.random()*MAP_TILES);
+    } while(grid[ty][tx] === 1 || players.some(p => p.tileX === tx && p.tileY === ty));
+    // pixel coordinates: top-left of centered sprite inside tile
+    const px = tx * BASE_TILE_PX + (BASE_TILE_PX - PLAYER_W) / 2;
+    const py = ty * BASE_TILE_PX + (BASE_TILE_PX - PLAYER_H) / 2;
+    players.push({
+      id: i+1,
+      x: px,
+      y: py,
+      alive: true,
+      hasBomb: false,
+      lastDirX: 1, // default facing right
+      lastDirY: 0,
+      tileX: tx,
+      tileY: ty
+    });
   }
 }
 
-// Give bomb to random player
+/* ---------- Give bomb to random alive player ---------- */
 function giveBomb(){
-  let alive=players.filter(p=>p.alive);
-  let pick=alive[Math.floor(Math.random()*alive.length)];
-  pick.hasBomb=true;
-  bomb={x:pick.x,y:pick.y,dir:null,holder:pick,explodeTimer:startTime};
+  const alive = players.filter(p => p.alive);
+  if(alive.length === 0) { bomb = null; return; }
+  const pick = alive[Math.floor(Math.random()*alive.length)];
+  pick.hasBomb = true;
+  bomb = {
+    x: pick.x + PLAYER_W/2 - BOMB_SIZE_PX/2,
+    y: pick.y + PLAYER_H/2 - BOMB_SIZE_PX/2,
+    vx: 0, vy: 0,
+    isFlying: false,
+    holderIndex: players.indexOf(pick),
+    fromIndex: null
+  };
 }
 
-// Collision
-function isBlocked(x,y){
-  if(x<0||y<0||x>=mapSize||y>=mapSize) return true;
-  if(grid[y][x]===1) return true;
-  if(players.some(p=>p.alive && p.x===x && p.y===y)) return true;
+/* ---------- Utility: check wall collision of a rect (px coords) ---------- */
+function rectHitsWall(px, py, w, h){
+  // compute covered tile range
+  const left = Math.floor(px / BASE_TILE_PX);
+  const right = Math.floor((px + w - 1) / BASE_TILE_PX);
+  const top = Math.floor(py / BASE_TILE_PX);
+  const bottom = Math.floor((py + h - 1) / BASE_TILE_PX);
+  for(let ty = top; ty <= bottom; ty++){
+    if(ty < 0 || ty >= MAP_TILES) return true;
+    for(let tx = left; tx <= right; tx++){
+      if(tx < 0 || tx >= MAP_TILES) return true;
+      if(grid[ty][tx] === 1) return true;
+    }
+  }
   return false;
 }
 
-function lerp(a,b,t){ return a + (b-a)*t; }
+/* ---------- Utility: players collision (rect overlap) ---------- */
+function rectHitsPlayer(px, py, w, h, excludeIndex = -1){
+  for(let i=0;i<players.length;i++){
+    if(i === excludeIndex) continue;
+    const p = players[i];
+    if(!p.alive) continue;
+    const px2 = p.x, py2 = p.y, w2 = PLAYER_W, h2 = PLAYER_H;
+    if(px < px2 + w2 && px + w > px2 && py < py2 + h2 && py + h > py2){
+      return i;
+    }
+  }
+  return -1;
+}
 
-// Explosion
-function explode(x,y){
-  explosions.push({x,y,frame:0});
-  players.forEach(p=>{
-    if(p.alive && p.x===x && p.y===y){ p.alive=false; if(bomb && bomb.holder===p) bomb=null;}
+/* ---------- Explosion particles ---------- */
+function spawnExplosion(px, py){
+  for(let i=0;i<PARTICLE_COUNT;i++){
+    const angle = Math.random()*Math.PI*2;
+    const speed = rand(1.5, 4.5);
+    particles.push({
+      x: px,
+      y: py,
+      vx: Math.cos(angle)*speed,
+      vy: Math.sin(angle)*speed - rand(0,1.5),
+      life: rand(18,38),
+      age: 0,
+      color: `rgba(255,${Math.floor(rand(120,200))},0,1)`
+    });
+  }
+}
+
+/* ---------- Handle explosion at tile (center) ---------- */
+function explodeAt(x, y){
+  // x,y in pixels (top-left). spawn particles at center.
+  const cx = x + PLAYER_W/2;
+  const cy = y + PLAYER_H/2;
+  spawnExplosion(cx, cy);
+
+  // kill any players whose bounding boxes intersect the explosion tile
+  players.forEach(p => {
+    if(!p.alive) return;
+    // simple distance check to center -> kill if within 0.9 * tile
+    const pxCenter = p.x + PLAYER_W/2;
+    const pyCenter = p.y + PLAYER_H/2;
+    const dx = pxCenter - cx;
+    const dy = pyCenter - cy;
+    const dist = Math.hypot(dx, dy);
+    if(dist < BASE_TILE_PX * 0.9){
+      p.alive = false;
+      p.hasBomb = false;
+    }
   });
 }
 
-// Game loop
-function update(){
-  if(!gameRunning) return;
-  moveCounter++;
-  let moveStep = moveCounter%6===0; // move every 6 frames
+/* ---------- Timer control ---------- */
+let timerTickHandle = null;
+function startRoundTimer(){
+  if(timerTickHandle) clearInterval(timerTickHandle);
+  timerTickHandle = setInterval(() => {
+    timeLeft = Math.max(0, timeLeft - 1);
+    if(timeLeft <= 0){
+      // trigger explosion now
+      handleRoundEndByTimer();
+    }
+  }, 1000);
+}
+function stopRoundTimer(){
+  if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
+}
 
-  // Movement
-  if(moveStep){
-    players.forEach((p,i)=>{
-      if(!p.alive) return;
-      let ctrl=controls[i];
-      let nx=p.x, ny=p.y;
-      if(keys[ctrl.up]) ny--;
-      if(keys[ctrl.down]) ny++;
-      if(keys[ctrl.left]) nx--;
-      if(keys[ctrl.right]) nx++;
-      if((nx!==p.x||ny!==p.y) && !isBlocked(nx,ny)){
-        p.x=nx; p.y=ny;
-        if(bomb && bomb.holder===p){ bomb.x=p.x; bomb.y=p.y; }
+/* ---------- When time runs out for a round ---------- */
+function handleRoundEndByTimer(){
+  stopRoundTimer();
+  // if bomb held, explode at holder; if flying explode at bomb pos
+  if(bomb){
+    if(bomb.holderIndex !== null && bomb.holderIndex !== undefined){
+      const holder = players[bomb.holderIndex];
+      if(holder && holder.alive){
+        explodeAt(holder.x, holder.y);
+        holder.alive = false;
       }
-    });
+    } else {
+      // bomb position explosion
+      explodeAt(bomb.x, bomb.y);
+    }
+    bomb = null;
   }
 
-  // Throw
-  players.forEach((p,i)=>{
-    if(!p.alive) return;
-    if(bomb && bomb.holder===p){
-      if(keys[controls[i].throw]){
-        let dirX=0,dirY=0;
-        if(keys[controls[i].up]) dirY=-1;
-        else if(keys[controls[i].down]) dirY=1;
-        else if(keys[controls[i].left]) dirX=-1;
-        else if(keys[controls[i].right]) dirX=1;
-        if(dirX||dirY){
-          bomb.holder=null;
-          bomb.x=p.x; bomb.y=p.y;
-          bomb.dir={x:dirX,y:dirY};
-          p.hasBomb=false;
+  // remove dead players and decide next round or end
+  const alive = players.filter(p => p.alive);
+  if(alive.length <= 1){
+    // end game
+    running = false;
+    stopRoundTimer();
+    gameover.style.display = 'flex';
+    winnerText.textContent = alive.length === 1 ? `Player ${alive[0].id} Wins!` : 'No one wins';
+  } else {
+    // restart round: reset timer and give a bomb
+    timeLeft = startTime;
+    giveBomb();
+    startRoundTimer();
+  }
+}
+
+/* ---------- Throw detection helper (rising-edge) ---------- */
+function isNewPress(code){
+  return !!keys[code] && !prevKeys[code];
+}
+
+/* ---------- Main update loop ---------- */
+function update(){
+  if(!running) return;
+
+  // --- Movement (pixel-based) ---
+  for(let i=0;i<players.length;i++){
+    const p = players[i];
+    if(!p.alive) continue;
+    let dx = 0, dy = 0;
+    const ctrl = controls[i];
+    if(keys[ctrl.up]) dy -= PLAYER_SPEED_PX;
+    if(keys[ctrl.down]) dy += PLAYER_SPEED_PX;
+    if(keys[ctrl.left]) dx -= PLAYER_SPEED_PX;
+    if(keys[ctrl.right]) dx += PLAYER_SPEED_PX;
+
+    // Update lastDir for throwing intent if movement input present
+    if(dx !== 0 || dy !== 0){
+      const mag = Math.hypot(dx,dy) || 1;
+      p.lastDirX = dx/mag;
+      p.lastDirY = dy/mag;
+    }
+
+    // Try move X
+    if(dx !== 0){
+      const newX = p.x + dx;
+      if(!rectHitsWall(newX, p.y, PLAYER_W, PLAYER_H) && rectHitsPlayer(newX, p.y, PLAYER_W, PLAYER_H, i) === -1){
+        p.x = newX;
+      }
+    }
+    // Try move Y
+    if(dy !== 0){
+      const newY = p.y + dy;
+      if(!rectHitsWall(p.x, newY, PLAYER_W, PLAYER_H) && rectHitsPlayer(p.x, newY, PLAYER_W, PLAYER_H, i) === -1){
+        p.y = newY;
+      }
+    }
+
+    // keep tile indices (for spawn logic etc.)
+    p.tileX = Math.floor((p.x + PLAYER_W/2) / BASE_TILE_PX);
+    p.tileY = Math.floor((p.y + PLAYER_H/2) / BASE_TILE_PX);
+  }
+
+  // --- Throw logic (rising edge only) ---
+  for(let i=0;i<players.length;i++){
+    const p = players[i];
+    if(!p.alive) continue;
+    const ctrl = controls[i];
+    if(p.hasBomb && isNewPress(ctrl.throw)){
+      // Use player's lastDir (pixel vector). If zero, default to right.
+      let dirX = p.lastDirX || 1;
+      let dirY = p.lastDirY || 0;
+      // normalize
+      const mag = Math.hypot(dirX, dirY) || 1;
+      dirX /= mag;
+      dirY /= mag;
+      // start bomb flying from center of player
+      bomb = {
+        x: p.x + PLAYER_W/2 - BOMB_SIZE_PX/2,
+        y: p.y + PLAYER_H/2 - BOMB_SIZE_PX/2,
+        vx: dirX * BOMB_SPEED_PX,
+        vy: dirY * BOMB_SPEED_PX,
+        isFlying: true,
+        holderIndex: null,
+        fromIndex: i
+      };
+      p.hasBomb = false;
+    }
+  }
+
+  // --- Bomb flight (pixel-based) ---
+  if(bomb && bomb.isFlying){
+    bomb.x += bomb.vx;
+    bomb.y += bomb.vy;
+
+    // collision with walls (tile check)
+    const tx = Math.floor((bomb.x + BOMB_SIZE_PX/2) / BASE_TILE_PX);
+    const ty = Math.floor((bomb.y + BOMB_SIZE_PX/2) / BASE_TILE_PX);
+    if(tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES || grid[ty][tx] === 1){
+      // return to thrower
+      const from = (bomb.fromIndex !== undefined && bomb.fromIndex !== null) ? players[bomb.fromIndex] : null;
+      if(from && from.alive){
+        from.hasBomb = true;
+        bomb = {
+          x: from.x + PLAYER_W/2 - BOMB_SIZE_PX/2,
+          y: from.y + PLAYER_H/2 - BOMB_SIZE_PX/2,
+          vx: 0, vy: 0, isFlying: false, holderIndex: players.indexOf(from), fromIndex: null
+        };
+      } else {
+        // no thrower alive, simply stop the bomb where it hit
+        bomb.isFlying = false;
+        bomb.vx = bomb.vy = 0;
+        bomb.holderIndex = null;
+      }
+    } else {
+      // collision with players (simple bounding-box hit)
+      for(let i=0;i<players.length;i++){
+        const p = players[i];
+        if(!p.alive) continue;
+        const px = p.x, py = p.y;
+        if(bomb.x < px + PLAYER_W && bomb.x + BOMB_SIZE_PX > px &&
+           bomb.y < py + PLAYER_H && bomb.y + BOMB_SIZE_PX > py){
+          // hit player -> that player gets bomb
+          p.hasBomb = true;
+          bomb = {
+            x: p.x + PLAYER_W/2 - BOMB_SIZE_PX/2,
+            y: p.y + PLAYER_H/2 - BOMB_SIZE_PX/2,
+            vx:0,vy:0,isFlying:false,holderIndex:i,fromIndex:null
+          };
+          break;
         }
       }
     }
-  });
-
-  // Bomb travel
-  if(bomb && !bomb.holder && bomb.dir){
-    let nx=bomb.x+bomb.dir.x, ny=bomb.y+bomb.dir.y;
-    if(nx<0||ny<0||nx>=mapSize||ny>=mapSize || grid[ny][nx]===1){
-      bomb.dir=null;
-    }else{
-      let hit=players.find(pl=>pl.alive && pl.x===nx && pl.y===ny);
-      if(hit){ hit.hasBomb=true; bomb.holder=hit; bomb.dir=null; }
-      else { bomb.x=nx; bomb.y=ny; }
-    }
   }
 
-  // Bomb timer
-  if(bomb){ bomb.explodeTimer-=(1/60); if(bomb.explodeTimer<=0){ explode(bomb.x,bomb.y); bomb=null; } }
+  // --- Round timer and explosion handled by timer tick (see startRoundTimer) ---
 
-  // Update explosions
-  explosions.forEach(e=>e.frame++);
-  explosions = explosions.filter(e=>e.frame<15);
-
-  // Check alive
-  let alive=players.filter(p=>p.alive);
-  if(alive.length<=1 && !bomb){
-    gameRunning=false;
-    document.getElementById("winnerText").textContent=alive.length?`Player ${alive[0].id} Wins!`:"No one wins";
-    document.getElementById("gameover").style.display="flex";
+  // --- Update particles ---
+  for(let i = particles.length-1; i>=0; i--){
+    const sp = particles[i];
+    sp.age++;
+    sp.x += sp.vx;
+    sp.y += sp.vy;
+    sp.vy += 0.12; // gravity for particles
+    if(sp.age > sp.life) particles.splice(i,1);
   }
 
-  // Camera
-  if(alive.length>0){
-    let minX=Math.min(...alive.map(p=>p.x));
-    let maxX=Math.max(...alive.map(p=>p.x));
-    let minY=Math.min(...alive.map(p=>p.y));
-    let maxY=Math.max(...alive.map(p=>p.y));
-    let boxWidth=maxX-minX+1, boxHeight=maxY-minY+1;
+  // --- Camera: compute target that fits all alive players (in tile units) ---
+  const alivePlayers = players.filter(p => p.alive);
+  if(alivePlayers.length > 0){
+    let minTx = Infinity, maxTx = -Infinity, minTy = Infinity, maxTy = -Infinity;
+    alivePlayers.forEach(p=>{
+      const leftTile = (p.x) / BASE_TILE_PX;
+      const rightTile = (p.x + PLAYER_W) / BASE_TILE_PX;
+      const topTile = (p.y) / BASE_TILE_PX;
+      const bottomTile = (p.y + PLAYER_H) / BASE_TILE_PX;
+      minTx = Math.min(minTx, leftTile);
+      maxTx = Math.max(maxTx, rightTile);
+      minTy = Math.min(minTy, topTile);
+      maxTy = Math.max(maxTy, bottomTile);
+    });
+    // padding in tiles
+    const PAD = 1.2;
+    const boxWidthTiles = (maxTx - minTx) + PAD;
+    const boxHeightTiles = (maxTy - minTy) + PAD;
 
-    let baseTile = canvas.width/mapSize;
-    let fitTileX = canvas.width/boxWidth;
-    let fitTileY = canvas.height/boxHeight;
-    let targetZoom = Math.min(fitTileX, fitTileY);
-    if(targetZoom>baseTile) targetZoom=baseTile;
+    const baseTile = canvas.width / MAP_TILES; // max zoom-in (pixels per tile)
+    let targetTileSize = Math.min(canvas.width / boxWidthTiles, canvas.height / boxHeightTiles);
+    if(targetTileSize > baseTile) targetTileSize = baseTile;
 
-    let centerX=(minX+maxX+1)/2;
-    let centerY=(minY+maxY+1)/2;
+    // center in tile units
+    const centerTileX = (minTx + maxTx) / 2;
+    const centerTileY = (minTy + maxTy) / 2;
 
-    camZoom=lerp(camZoom,targetZoom,0.1);
-    camX=lerp(camX,centerX-(canvas.width/(2*camZoom)),0.1);
-    camY=lerp(camY,centerY-(canvas.height/(2*camZoom)),0.1);
+    // smooth lerp camera
+    camTileSize = lerp(camTileSize || baseTile, targetTileSize, CAMERA_SMOOTH);
+    const targetCamX = centerTileX - (canvas.width / (2*camTileSize));
+    const targetCamY = centerTileY - (canvas.height / (2*camTileSize));
+    camX = lerp(camX, targetCamX, CAMERA_SMOOTH);
+    camY = lerp(camY, targetCamY, CAMERA_SMOOTH);
   }
 
-  // Draw
+  // --- Draw world using camTileSize (pixels per tile) ---
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  for(let y=0;y<mapSize;y++){
-    for(let x=0;x<mapSize;x++){
-      let dx=(x-camX)*camZoom;
-      let dy=(y-camY)*camZoom;
-      if(dx+camZoom<0||dy+camZoom<0||dx>canvas.width||dy>canvas.height) continue;
-      ctx.drawImage(grid[y][x]===1?wallImg:groundImg,dx,dy,camZoom,camZoom);
+
+  // Tiles
+  for(let ty=0; ty<MAP_TILES; ty++){
+    for(let tx=0; tx<MAP_TILES; tx++){
+      const sx = (tx - camX) * camTileSize;
+      const sy = (ty - camY) * camTileSize;
+      // skip tiles outside screen
+      if(sx + camTileSize < 0 || sy + camTileSize < 0 || sx > canvas.width || sy > canvas.height) continue;
+      const img = (grid[ty][tx] === 1) ? imgWall : imgGround;
+      ctx.drawImage(img, sx, sy, camTileSize, camTileSize);
     }
   }
+
+  // Players
   players.forEach(p=>{
-    if(p.alive){
-      let img=p.hasBomb?playerImgs[p.id+"b"]:playerImgs[p.id];
-      let dx=(p.x-camX)*camZoom;
-      let dy=(p.y-camY)*camZoom;
-      ctx.drawImage(img,dx,dy,camZoom,camZoom);
-    }
-  });
-  if(bomb && !bomb.holder){
-    let dx=(bomb.x-camX)*camZoom;
-    let dy=(bomb.y-camY)*camZoom;
-    ctx.drawImage(bombImg,dx,dy,camZoom,camZoom);
-  }
-  explosions.forEach(e=>{
-    let dx=(e.x-camX)*camZoom;
-    let dy=(e.y-camY)*camZoom;
-    ctx.fillStyle="orange";
-    ctx.fillRect(dx,dy,camZoom,camZoom);
+    if(!p.alive) return;
+    const sx = ((p.x)/BASE_TILE_PX - camX) * camTileSize;
+    const sy = ((p.y)/BASE_TILE_PX - camY) * camTileSize;
+    const drawW = (PLAYER_W / BASE_TILE_PX) * camTileSize;
+    const drawH = (PLAYER_H / BASE_TILE_PX) * camTileSize;
+    const img = p.hasBomb ? playerImgs['pb'+p.id] : playerImgs['p'+p.id];
+    ctx.drawImage(img, sx, sy, drawW, drawH);
   });
 
-  // Timer top-left
-  ctx.fillStyle="white"; 
-  ctx.font=`${canvas.width/25}px 'Press Start 2P'`;
-  ctx.fillText(Math.ceil(timeLeft),10,canvas.height-10);
+  // Bomb if flying or held by none
+  if(bomb && !bomb.isFlying && bomb.holderIndex != null){
+    // bomb on holder (we draw as part of player's sprite; so skip)
+  } else if(bomb){
+    const sx = ((bomb.x)/BASE_TILE_PX - camX) * camTileSize;
+    const sy = ((bomb.y)/BASE_TILE_PX - camY) * camTileSize;
+    const drawW = (BOMB_SIZE_PX / BASE_TILE_PX) * camTileSize;
+    const drawH = (BOMB_SIZE_PX / BASE_TILE_PX) * camTileSize;
+    ctx.drawImage(imgBomb, sx, sy, drawW, drawH);
+  }
+
+  // Particles
+  particles.forEach(p=>{
+    const sx = (p.x / BASE_TILE_PX - camX) * camTileSize;
+    const sy = (p.y / BASE_TILE_PX - camY) * camTileSize;
+    const alpha = 1 - (p.age / p.life);
+    ctx.fillStyle = p.color.replace(/,1\)$/, ',' + alpha + ')');
+    const size = Math.max(1, (camTileSize * 0.06));
+    ctx.fillRect(sx, sy, size, size);
+  });
+
+  // Timer top-left inside canvas (safe margin)
+  ctx.fillStyle = "white";
+  ctx.font = `${Math.max(12, canvas.width/30)}px 'Press Start 2P'`;
+  ctx.textBaseline = 'top';
+  ctx.fillText(String(Math.ceil(timeLeft)), 8, 8);
+
+  // update prevKeys (rising-edge detection)
+  for(let k in keys) prevKeys[k] = keys[k];
 
   requestAnimationFrame(update);
 }
 
-// UI
-document.getElementById("menu").style.display="flex";
-document.getElementById("btn2").onclick=()=>{numPlayers=2;document.getElementById("menu").style.display="none";document.getElementById("settings").style.display="flex";};
-document.getElementById("btn3").onclick=()=>{numPlayers=3;document.getElementById("menu").style.display="none";document.getElementById("settings").style.display="flex";};
-document.getElementById("btn4").onclick=()=>{numPlayers=4;document.getElementById("menu").style.display="none";document.getElementById("settings").style.display="flex";};
+/* ---------- Start game ---------- */
+function startGame(){
+  // read and validate time input
+  const val = parseInt(timeInput.value);
+  if(isNaN(val) || val < 5 || val > 60) return;
+  startTime = val;
+  timeLeft = startTime;
 
-document.getElementById("timeInput").addEventListener("input",()=>{
-  let v=+document.getElementById("timeInput").value;
-  let btn=document.getElementById("startBtn");
-  if(v<5||v>60){ btn.querySelector("img").src="images/buttons/start-gray.png"; btn.disabled=true; }
-  else { btn.querySelector("img").src="images/buttons/start.png"; btn.disabled=false; }
-});
+  // reset
+  generateMap();
+  spawnPlayers();
+  giveBomb();
+  particles = [];
+  running = true;
+  camX = 0; camY = 0; camTileSize = canvas.width / MAP_TILES;
 
-document.getElementById("startBtn").onclick=()=>{
-  let v=+document.getElementById("timeInput").value;
-  if(v<5||v>60) return;
-  startTime=v; timeLeft=v;
-  document.getElementById("settings").style.display="none";
-  generateMap(); spawnPlayers(); giveBomb();
-  gameRunning=true;
-  update();
-};
+  // start round timer
+  stopRoundTimer();
+  startRoundTimer();
 
-window.addEventListener("keydown",e=>{keys[e.code]=true;});
-window.addEventListener("keyup",e=>{keys[e.code]=false;});
+  // UI hide
+  settings.style.display = 'none';
+  menu.style.display = 'none';
+  gameover.style.display = 'none';
+
+  // clear prevKeys
+  prevKeys = {};
+  // begin update loop
+  requestAnimationFrame(update);
+}
+
+/* ---------- Deal with timer-based explosion if needed (already used by timer) ---------- */
+/* handleRoundEndByTimer defined above */
+
+/* ---------- Button wiring ---------- */
+btn2.addEventListener('click', ()=>{ numPlayers = 2; menu.style.display='none'; settings.style.display='flex'; startImg.src = 'images/buttons/start-gray.png'; startBtn.src='images/buttons/start-gray.png'; });
+btn3.addEventListener('click', ()=>{ numPlayers = 3; menu.style.display='none'; settings.style.display='flex'; startImg.src = 'images/buttons/start-gray.png'; startBtn.src='images/buttons/start-gray.png'; });
+btn4.addEventListener('click', ()=>{ numPlayers = 4; menu.style.display='none'; settings.style.display='flex'; startImg.src = 'images/buttons/start-gray.png'; startBtn.src='images/buttons/start-gray.png'; });
+
+// Start button visual control
+function validateStartButton(){
+  const v = parseInt(timeInput.value);
+  if(!isNaN(v) && v >=5 && v <= 60){
+    startBtn.src = 'images/buttons/start.png';
+  } else {
+    startBtn.src = 'images/buttons/start-gray.png';
+  }
+}
+timeInput.addEventListener('input', validateStartButton);
+startBtn.addEventListener('click', startGame);
+
+// Restart
+restartBtn.addEventListener('click', ()=> location.reload());
+
+/* ---------- initial UI state ---------- */
+menu.style.display = 'flex';
+settings.style.display = 'none';
+gameover.style.display = 'none';
+validateStartButton();
+
+/* ---------- expose some helpers for debug in console (optional) ---------- */
+window._gp = ()=>({players, bomb, grid, particles});
 </script>
 </body>
 </html>
