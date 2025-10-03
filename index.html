@@ -81,6 +81,7 @@ const ctx = canvas.getContext("2d");
 
 let players = [];
 let bombs = [];
+let explosions = [];
 let gameRunning = false;
 let roundTime = 20;
 let camera = { x:0, y:0, width:canvas.width, height:canvas.height };
@@ -115,7 +116,7 @@ class Player {
     this.x += vx*this.speed;
     this.y += vy*this.speed;
 
-    // Keep in map
+    // Keep inside map
     this.x = Math.max(0, Math.min(mapSize-this.width, this.x));
     this.y = Math.max(0, Math.min(mapSize-this.height, this.y));
 
@@ -166,7 +167,10 @@ class Bomb {
   update() {
     this.x+=this.vx;
     this.y+=this.vy;
-    if(this.x<0||this.x>mapSize||this.y<0||this.y>mapSize) this.active=false;
+    if(this.x<0||this.x>mapSize||this.y<0||this.y>mapSize) {
+      this.explode();
+      this.active=false;
+    }
     // collision
     for(let p of players){
       if(p.alive && !p.hasBomb && this.active &&
@@ -177,10 +181,34 @@ class Bomb {
       }
     }
   }
+  explode() {
+    for(let i=0;i<20;i++) {
+      explosions.push(new Particle(this.x,this.y));
+    }
+  }
   draw() {
     if(!this.active) return;
     ctx.fillStyle="orange";
     ctx.fillRect(this.x-camera.x,this.y-camera.y,this.size,this.size);
+  }
+}
+
+class Particle {
+  constructor(x,y) {
+    this.x=x;
+    this.y=y;
+    this.vx=(Math.random()-0.5)*8;
+    this.vy=(Math.random()-0.5)*8;
+    this.life=30;
+  }
+  update() {
+    this.x+=this.vx;
+    this.y+=this.vy;
+    this.life--;
+  }
+  draw() {
+    ctx.fillStyle=`rgba(255,200,0,${this.life/30})`;
+    ctx.fillRect(this.x-camera.x,this.y-camera.y,4,4);
   }
 }
 
@@ -230,11 +258,14 @@ function loop() {
   // Update
   players.forEach(p=>p.update());
   bombs.forEach(b=>b.update());
+  explosions.forEach(ex=>ex.update());
   bombs=bombs.filter(b=>b.active);
+  explosions=explosions.filter(ex=>ex.life>0);
   updateCamera();
   // Draw
   players.forEach(p=>p.draw());
   bombs.forEach(b=>b.draw());
+  explosions.forEach(ex=>ex.draw());
   requestAnimationFrame(loop);
 }
 </script>
