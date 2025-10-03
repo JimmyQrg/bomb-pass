@@ -8,6 +8,7 @@
   html,body{
     height:100%;
     margin:0;
+    background: #000;
   }
   /* background.png fills whole screen on lowest layer */
   body{
@@ -19,19 +20,16 @@
     align-items:center;
     justify-content:center;
     font-family: 'Press Start 2P', monospace;
-    -webkit-font-smoothing: none;
-    -moz-osx-font-smoothing: grayscale;
   }
 
   /* Square canvas centered (largest square that fits window) */
   #gameCanvas{
     image-rendering: pixelated;
-    background: #000; /* black borders visible around canvas */
+    background: transparent; /* allow background.png to show through */
     display:block;
-    box-shadow: 0 0 0 6px rgba(0,0,0,0.6);
   }
 
-  /* UI windows sit on top and are centered */
+  /* UI windows sit on top and are centered; semi-transparent so background is visible */
   .ui {
     position: absolute;
     top:50%;
@@ -40,16 +38,17 @@
     display:flex;
     flex-direction:column;
     align-items:center;
-    gap:6px; /* buttons closer */
-    padding:18px;
-    border:4px solid #444;
-    background: rgba(0,0,0,0.25); /* semi see-through so background.png is visible */
+    gap:4px; /* buttons closer */
+    padding:14px;
+    border:3px solid #333;
+    background: rgba(0,0,0,0.22);
   }
 
-  .ui img.button-img {
+  .button-img {
     transform: scale(0.5); /* buttons 2× smaller */
     image-rendering: pixelated;
     display:block;
+    cursor:pointer;
   }
 
   .ui input[type="number"]{
@@ -88,19 +87,17 @@
   </div>
 
 <script>
-/* ---------- Config ---------- */
+/* -------------- CONFIG -------------- */
 const MAP_TILES = 40;               // 40x40 map
-const BASE_TILE_PX = 48;            // world tile pixel size (world coordinates use px; each tile = 48px)
-const PLAYER_DRAW_TILE_RATIO = 1.0; // draw players at 1 tile size by default (scaled by camera)
-const PLAYER_W = BASE_TILE_PX * 0.9; // player bounding-box (px)
-const PLAYER_H = BASE_TILE_PX * 0.9;
-const BOMB_SIZE_PX = BASE_TILE_PX * 0.6;
-const PLAYER_SPEED_PX = 3.5;        // pixels per frame (you asked faster)
-const BOMB_SPEED_PX = 9;            // pixels per frame for thrown bomb
-const CAMERA_SMOOTH = 0.10;         // lerp factor for camera movement & zoom
-const PARTICLE_COUNT = 16;
+const BASE_TILE_PX = 48;            // world tile pixel size reference
+const PLAYER_W = Math.floor(BASE_TILE_PX * 0.9);
+const PLAYER_H = Math.floor(BASE_TILE_PX * 0.9);
+let PLAYER_SPEED_PX = 5.0;          // faster player speed (pixels/frame)
+let BOMB_SPEED_PX = 20.0;           // bomb speed (pixels/frame) — increased
+const CAMERA_SMOOTH = 0.10;
+const PARTICLE_COUNT = 18;
 
-/* ---------- DOM ---------- */
+/* -------------- DOM -------------- */
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const menu = document.getElementById('menu');
@@ -110,67 +107,74 @@ const btn2 = document.getElementById('btn2');
 const btn3 = document.getElementById('btn3');
 const btn4 = document.getElementById('btn4');
 const startBtn = document.getElementById('startBtn');
-const startImg = document.getElementById('startBtn');
 const timeInput = document.getElementById('timeInput');
 const restartBtn = document.getElementById('restartBtn');
 const winnerText = document.getElementById('winnerText');
 
-/* ---------- Images ---------- */
+/* -------------- IMAGES -------------- */
 const imgWall = new Image(); imgWall.src = 'images/blocks/wall.png';
 const imgGround = new Image(); imgGround.src = 'images/blocks/ground-slab.png';
 const imgBomb = new Image(); imgBomb.src = 'images/bomb.png';
 const playerImgs = {};
 for(let i=1;i<=4;i++){
-  playerImgs['p'+i] = new Image(); playerImgs['p'+i].src = `images/players/player-${i}.png`;
+  playerImgs['p'+i]  = new Image(); playerImgs['p'+i].src = `images/players/player-${i}.png`;
   playerImgs['pb'+i] = new Image(); playerImgs['pb'+i].src = `images/players/player-${i}-bomb.png`;
 }
 
-/* ---------- Input ---------- */
-let keys = {};        // current
-let prevKeys = {};    // previous frame (for rising-edge detection)
+/* -------------- INPUT -------------- */
+let keys = {};         // current frame
+let prevKeys = {};     // previous frame for rising-edge detection
 window.addEventListener('keydown', e => { keys[e.code] = true; });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
-/* ---------- Game state ---------- */
-let grid = []; // 2D tile array: 0 ground, 1 wall
-let players = []; // array of player objects {id,x,y,alive,hasBomb,lastDirX,lastDirY}
-let bomb = null;  // {x,y,vx,vy,isFlying,holderIndex,fromIndex}
-let particles = []; // explosion particles
+/* -------------- STATE -------------- */
+let grid = [];              // map tiles
+let players = [];           // player objects
+let bomb = null;            // bomb object (pixel coords)
+let particles = [];         // explosion particles
+let trails = [];            // per-player trail arrays
 let numPlayers = 2;
-let startTime = 20;   // seconds for round (updated by settings)
-let timeLeft = 0;     // seconds left in the round
-let timerInterval = null;
+let startTime = 20;
+let timeLeft = 0;
+let timerHandle = null;
 let running = false;
 
-/* ---------- Camera (in tile units) ---------- */
-let camX = 0; // top-left tile coordinate
-let camY = 0;
-let camTileSize = 0; // pixels per tile used for rendering (changes with zoom)
+/* Camera (tile units) */
+let camX = 0, camY = 0;
+let camTileSize = canvas.width / MAP_TILES; // pixels per tile used in rendering
 
-/* ---------- Controls mapping (codes) ---------- */
+/* -------------- Controls mapping -------------- */
 /* Throw keys: Q(1) -> KeyQ, /(2) -> Slash, U(3) -> KeyU, R(4) -> KeyR */
 const controls = [
-  { up:'KeyW', down:'KeyS', left:'KeyA', right:'KeyD', throw:'KeyQ' },
-  { up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight', throw:'Slash' },
-  { up:'KeyI', down:'KeyK', left:'KeyJ', right:'KeyL', throw:'KeyU' },
-  { up:'KeyT', down:'KeyG', left:'KeyF', right:'KeyH', throw:'KeyR' }
+  { up:'KeyW',   down:'KeyS', left:'KeyA',   right:'KeyD',   throw:'KeyQ'  },
+  { up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',throw:'Slash' },
+  { up:'KeyI',   down:'KeyK', left:'KeyJ',   right:'KeyL',   throw:'KeyU'  },
+  { up:'KeyT',   down:'KeyG', left:'KeyF',   right:'KeyH',   throw:'KeyR'  }
 ];
 
-/* ---------- Utilities ---------- */
-function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
-function lerp(a,b,t){ return a + (b-a) * t; }
+const playerColors = [
+  'rgba(255,120,120,',
+  'rgba(120,255,140,',
+  'rgba(120,160,255,',
+  'rgba(255,255,120,'
+];
+
+/* -------------- UTIL -------------- */
+function lerp(a,b,t){ return a + (b-a)*t; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
 function rand(min,max){ return Math.random()*(max-min)+min; }
 
-/* ---------- Resize canvas (largest square inside window) ---------- */
+/* -------------- Resize canvas -------------- */
 function resizeCanvas(){
   const size = Math.min(window.innerWidth, window.innerHeight);
   canvas.width = canvas.height = size;
-  // Recompute cam base tile later in render step
+  // update camTileSize fallback
+  camTileSize = canvas.width / MAP_TILES;
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-/* ---------- Map generation ---------- */
+/* -------------- Map generation -------------- */
 function generateMap(){
   grid = [];
   for(let y=0;y<MAP_TILES;y++){
@@ -183,41 +187,42 @@ function generateMap(){
   }
 }
 
-/* ---------- Spawn players (pixel positions centered in tile) ---------- */
+/* -------------- Spawn players (pixel coords centered in tile) -------------- */
 function spawnPlayers(){
   players = [];
+  trails = [];
   for(let i=0;i<numPlayers;i++){
     let tx, ty;
-    do{
-      tx = Math.floor(Math.random()*MAP_TILES);
-      ty = Math.floor(Math.random()*MAP_TILES);
+    do {
+      tx = Math.floor(Math.random() * MAP_TILES);
+      ty = Math.floor(Math.random() * MAP_TILES);
     } while(grid[ty][tx] === 1 || players.some(p => p.tileX === tx && p.tileY === ty));
-    // pixel coordinates: top-left of centered sprite inside tile
     const px = tx * BASE_TILE_PX + (BASE_TILE_PX - PLAYER_W) / 2;
     const py = ty * BASE_TILE_PX + (BASE_TILE_PX - PLAYER_H) / 2;
     players.push({
       id: i+1,
       x: px,
       y: py,
+      tileX: tx,
+      tileY: ty,
       alive: true,
       hasBomb: false,
-      lastDirX: 1, // default facing right
-      lastDirY: 0,
-      tileX: tx,
-      tileY: ty
+      lastDirX: 1,
+      lastDirY: 0
     });
+    trails.push([]); // trail entries for this player
   }
 }
 
-/* ---------- Give bomb to random alive player ---------- */
+/* -------------- Give bomb to random alive player -------------- */
 function giveBomb(){
   const alive = players.filter(p => p.alive);
-  if(alive.length === 0) { bomb = null; return; }
+  if(alive.length === 0){ bomb = null; return; }
   const pick = alive[Math.floor(Math.random()*alive.length)];
   pick.hasBomb = true;
   bomb = {
-    x: pick.x + PLAYER_W/2 - BOMB_SIZE_PX/2,
-    y: pick.y + PLAYER_H/2 - BOMB_SIZE_PX/2,
+    x: pick.x + PLAYER_W/2 - (BASE_TILE_PX * 0.6)/2,
+    y: pick.y + PLAYER_H/2 - (BASE_TILE_PX * 0.6)/2,
     vx: 0, vy: 0,
     isFlying: false,
     holderIndex: players.indexOf(pick),
@@ -225,16 +230,15 @@ function giveBomb(){
   };
 }
 
-/* ---------- Utility: check wall collision of a rect (px coords) ---------- */
+/* -------------- Collision helpers -------------- */
 function rectHitsWall(px, py, w, h){
-  // compute covered tile range
   const left = Math.floor(px / BASE_TILE_PX);
   const right = Math.floor((px + w - 1) / BASE_TILE_PX);
   const top = Math.floor(py / BASE_TILE_PX);
   const bottom = Math.floor((py + h - 1) / BASE_TILE_PX);
-  for(let ty = top; ty <= bottom; ty++){
+  for(let ty=top; ty<=bottom; ty++){
     if(ty < 0 || ty >= MAP_TILES) return true;
-    for(let tx = left; tx <= right; tx++){
+    for(let tx=left; tx<=right; tx++){
       if(tx < 0 || tx >= MAP_TILES) return true;
       if(grid[ty][tx] === 1) return true;
     }
@@ -242,174 +246,179 @@ function rectHitsWall(px, py, w, h){
   return false;
 }
 
-/* ---------- Utility: players collision (rect overlap) ---------- */
-function rectHitsPlayer(px, py, w, h, excludeIndex = -1){
+function rectHitsPlayer(px, py, w, h, excludeIndex=-1){
   for(let i=0;i<players.length;i++){
     if(i === excludeIndex) continue;
     const p = players[i];
     if(!p.alive) continue;
-    const px2 = p.x, py2 = p.y, w2 = PLAYER_W, h2 = PLAYER_H;
-    if(px < px2 + w2 && px + w > px2 && py < py2 + h2 && py + h > py2){
+    if(px < p.x + PLAYER_W && px + w > p.x && py < p.y + PLAYER_H && py + h > p.y){
       return i;
     }
   }
   return -1;
 }
 
-/* ---------- Explosion particles ---------- */
-function spawnExplosion(px, py){
+/* -------------- Particles (explosion) -------------- */
+function spawnExplosionAtCenter(px, py){
+  // px,py are top-left of tile-like center or pixel center — we spawn particles around center
+  const cx = px;
+  const cy = py;
   for(let i=0;i<PARTICLE_COUNT;i++){
     const angle = Math.random()*Math.PI*2;
-    const speed = rand(1.5, 4.5);
+    const speed = rand(1.8, 5.8);
     particles.push({
-      x: px,
-      y: py,
+      x: cx + rand(-8,8),
+      y: cy + rand(-8,8),
       vx: Math.cos(angle)*speed,
-      vy: Math.sin(angle)*speed - rand(0,1.5),
-      life: rand(18,38),
+      vy: Math.sin(angle)*speed - rand(0,1.2),
+      life: Math.floor(rand(20,36)),
       age: 0,
-      color: `rgba(255,${Math.floor(rand(120,200))},0,1)`
+      color: `rgba(255,${Math.floor(rand(120,240))},0,`
     });
   }
 }
 
-/* ---------- Handle explosion at tile (center) ---------- */
-function explodeAt(x, y){
-  // x,y in pixels (top-left). spawn particles at center.
-  const cx = x + PLAYER_W/2;
-  const cy = y + PLAYER_H/2;
-  spawnExplosion(cx, cy);
-
-  // kill any players whose bounding boxes intersect the explosion tile
+/* Explosion that affects players (px,py are pixel coordinates center-ish) */
+function explodeAt(px, py){
+  spawnExplosionAtCenter(px, py);
+  // kill any players within ~0.9 tile radius
+  const radius = BASE_TILE_PX * 0.9;
   players.forEach(p => {
     if(!p.alive) return;
-    // simple distance check to center -> kill if within 0.9 * tile
-    const pxCenter = p.x + PLAYER_W/2;
-    const pyCenter = p.y + PLAYER_H/2;
-    const dx = pxCenter - cx;
-    const dy = pyCenter - cy;
-    const dist = Math.hypot(dx, dy);
-    if(dist < BASE_TILE_PX * 0.9){
+    const cx = p.x + PLAYER_W/2;
+    const cy = p.y + PLAYER_H/2;
+    const d = Math.hypot(cx - px, cy - py);
+    if(d < radius){
       p.alive = false;
       p.hasBomb = false;
     }
   });
 }
 
-/* ---------- Timer control ---------- */
-let timerTickHandle = null;
+/* -------------- Timer behavior -------------- */
+let tickTimer = null;
 function startRoundTimer(){
-  if(timerTickHandle) clearInterval(timerTickHandle);
-  timerTickHandle = setInterval(() => {
+  if(tickTimer) clearInterval(tickTimer);
+  tickTimer = setInterval(()=>{
     timeLeft = Math.max(0, timeLeft - 1);
     if(timeLeft <= 0){
-      // trigger explosion now
-      handleRoundEndByTimer();
+      // explosion due to timer
+      if(bomb){
+        if(bomb.holderIndex !== null && bomb.holderIndex !== undefined){
+          const holder = players[bomb.holderIndex];
+          if(holder && holder.alive){
+            explodeAt(holder.x + PLAYER_W/2, holder.y + PLAYER_H/2);
+            holder.alive = false;
+          }
+        } else {
+          // bomb flying or resting in world
+          explodeAt(bomb.x + (BASE_TILE_PX*0.6)/2, bomb.y + (BASE_TILE_PX*0.6)/2);
+        }
+        bomb = null;
+      }
+      // check alive players
+      const alive = players.filter(p => p.alive);
+      if(alive.length <= 1){
+        // game over
+        running = false;
+        clearInterval(tickTimer);
+        gameover.style.display = 'flex';
+        winnerText.textContent = alive.length === 1 ? `Player ${alive[0].id} Wins!` : 'No one wins';
+      } else {
+        // new round
+        timeLeft = startTime;
+        giveBomb();
+      }
     }
   }, 1000);
 }
-function stopRoundTimer(){
-  if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
-}
+function stopRoundTimer(){ if(tickTimer){ clearInterval(tickTimer); tickTimer = null; } }
 
-/* ---------- When time runs out for a round ---------- */
-function handleRoundEndByTimer(){
-  stopRoundTimer();
-  // if bomb held, explode at holder; if flying explode at bomb pos
-  if(bomb){
-    if(bomb.holderIndex !== null && bomb.holderIndex !== undefined){
-      const holder = players[bomb.holderIndex];
-      if(holder && holder.alive){
-        explodeAt(holder.x, holder.y);
-        holder.alive = false;
-      }
-    } else {
-      // bomb position explosion
-      explodeAt(bomb.x, bomb.y);
-    }
-    bomb = null;
-  }
-
-  // remove dead players and decide next round or end
-  const alive = players.filter(p => p.alive);
-  if(alive.length <= 1){
-    // end game
-    running = false;
-    stopRoundTimer();
-    gameover.style.display = 'flex';
-    winnerText.textContent = alive.length === 1 ? `Player ${alive[0].id} Wins!` : 'No one wins';
-  } else {
-    // restart round: reset timer and give a bomb
-    timeLeft = startTime;
-    giveBomb();
-    startRoundTimer();
-  }
-}
-
-/* ---------- Throw detection helper (rising-edge) ---------- */
+/* -------------- Rising-edge detection -------------- */
 function isNewPress(code){
   return !!keys[code] && !prevKeys[code];
 }
 
-/* ---------- Main update loop ---------- */
+/* -------------- Update loop -------------- */
 function update(){
   if(!running) return;
+
+  // --- player trails: push current pos (every frame) and cap length ---
+  for(let i=0;i<players.length;i++){
+    const p = players[i];
+    // store center pos for trail
+    if(p.alive){
+      trails[i].unshift({ x: p.x + PLAYER_W/2, y: p.y + PLAYER_H/2, age: 0 });
+      if(trails[i].length > 14) trails[i].pop();
+    } else {
+      trails[i] = [];
+    }
+  }
 
   // --- Movement (pixel-based) ---
   for(let i=0;i<players.length;i++){
     const p = players[i];
     if(!p.alive) continue;
-    let dx = 0, dy = 0;
     const ctrl = controls[i];
+    let dx = 0, dy = 0;
     if(keys[ctrl.up]) dy -= PLAYER_SPEED_PX;
     if(keys[ctrl.down]) dy += PLAYER_SPEED_PX;
     if(keys[ctrl.left]) dx -= PLAYER_SPEED_PX;
     if(keys[ctrl.right]) dx += PLAYER_SPEED_PX;
 
-    // Update lastDir for throwing intent if movement input present
-    if(dx !== 0 || dy !== 0){
+    // normalize diagonal speed
+    if(dx !== 0 && dy !== 0){
+      const m = Math.hypot(dx,dy);
+      dx = dx / m * PLAYER_SPEED_PX;
+      dy = dy / m * PLAYER_SPEED_PX;
+    }
+
+    // update last direction (for throw direction)
+    if(Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001){
       const mag = Math.hypot(dx,dy) || 1;
-      p.lastDirX = dx/mag;
-      p.lastDirY = dy/mag;
+      p.lastDirX = dx / mag;
+      p.lastDirY = dy / mag;
     }
 
-    // Try move X
+    // attempt X move
     if(dx !== 0){
-      const newX = p.x + dx;
-      if(!rectHitsWall(newX, p.y, PLAYER_W, PLAYER_H) && rectHitsPlayer(newX, p.y, PLAYER_W, PLAYER_H, i) === -1){
-        p.x = newX;
+      const nx = p.x + dx;
+      if(!rectHitsWall(nx, p.y, PLAYER_W, PLAYER_H) && rectHitsPlayer(nx, p.y, PLAYER_W, PLAYER_H, i) === -1){
+        p.x = nx;
       }
     }
-    // Try move Y
     if(dy !== 0){
-      const newY = p.y + dy;
-      if(!rectHitsWall(p.x, newY, PLAYER_W, PLAYER_H) && rectHitsPlayer(p.x, newY, PLAYER_W, PLAYER_H, i) === -1){
-        p.y = newY;
+      const ny = p.y + dy;
+      if(!rectHitsWall(p.x, ny, PLAYER_W, PLAYER_H) && rectHitsPlayer(p.x, ny, PLAYER_W, PLAYER_H, i) === -1){
+        p.y = ny;
       }
     }
 
-    // keep tile indices (for spawn logic etc.)
+    // keep tile coords updated
     p.tileX = Math.floor((p.x + PLAYER_W/2) / BASE_TILE_PX);
     p.tileY = Math.floor((p.y + PLAYER_H/2) / BASE_TILE_PX);
+
+    // if player holds bomb, update bomb position to follow smoothly
+    if(bomb && bomb.holderIndex === i){
+      bomb.x = p.x + PLAYER_W/2 - (BASE_TILE_PX*0.6)/2;
+      bomb.y = p.y + PLAYER_H/2 - (BASE_TILE_PX*0.6)/2;
+    }
   }
 
-  // --- Throw logic (rising edge only) ---
+  // --- Throw logic (rising-edge) ---
   for(let i=0;i<players.length;i++){
     const p = players[i];
     if(!p.alive) continue;
     const ctrl = controls[i];
     if(p.hasBomb && isNewPress(ctrl.throw)){
-      // Use player's lastDir (pixel vector). If zero, default to right.
+      // use lastDir; fallback to right
       let dirX = p.lastDirX || 1;
       let dirY = p.lastDirY || 0;
-      // normalize
       const mag = Math.hypot(dirX, dirY) || 1;
-      dirX /= mag;
-      dirY /= mag;
-      // start bomb flying from center of player
+      dirX /= mag; dirY /= mag;
       bomb = {
-        x: p.x + PLAYER_W/2 - BOMB_SIZE_PX/2,
-        y: p.y + PLAYER_H/2 - BOMB_SIZE_PX/2,
+        x: p.x + PLAYER_W/2 - (BASE_TILE_PX*0.6)/2,
+        y: p.y + PLAYER_H/2 - (BASE_TILE_PX*0.6)/2,
         vx: dirX * BOMB_SPEED_PX,
         vy: dirY * BOMB_SPEED_PX,
         isFlying: true,
@@ -420,44 +429,46 @@ function update(){
     }
   }
 
-  // --- Bomb flight (pixel-based) ---
+  // --- Bomb flight ---
   if(bomb && bomb.isFlying){
     bomb.x += bomb.vx;
     bomb.y += bomb.vy;
 
-    // collision with walls (tile check)
-    const tx = Math.floor((bomb.x + BOMB_SIZE_PX/2) / BASE_TILE_PX);
-    const ty = Math.floor((bomb.y + BOMB_SIZE_PX/2) / BASE_TILE_PX);
+    // center tile for bomb
+    const bx = bomb.x + (BASE_TILE_PX*0.6)/2;
+    const by = bomb.y + (BASE_TILE_PX*0.6)/2;
+    const tx = Math.floor(bx / BASE_TILE_PX);
+    const ty = Math.floor(by / BASE_TILE_PX);
+
+    // check wall collision
     if(tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES || grid[ty][tx] === 1){
-      // return to thrower
+      // return to thrower if alive
       const from = (bomb.fromIndex !== undefined && bomb.fromIndex !== null) ? players[bomb.fromIndex] : null;
       if(from && from.alive){
         from.hasBomb = true;
         bomb = {
-          x: from.x + PLAYER_W/2 - BOMB_SIZE_PX/2,
-          y: from.y + PLAYER_H/2 - BOMB_SIZE_PX/2,
-          vx: 0, vy: 0, isFlying: false, holderIndex: players.indexOf(from), fromIndex: null
+          x: from.x + PLAYER_W/2 - (BASE_TILE_PX*0.6)/2,
+          y: from.y + PLAYER_H/2 - (BASE_TILE_PX*0.6)/2,
+          vx:0, vy:0, isFlying:false, holderIndex: players.indexOf(from), fromIndex: null
         };
       } else {
-        // no thrower alive, simply stop the bomb where it hit
+        // stop bomb where it hit
         bomb.isFlying = false;
         bomb.vx = bomb.vy = 0;
-        bomb.holderIndex = null;
       }
     } else {
-      // collision with players (simple bounding-box hit)
+      // check collision with players
       for(let i=0;i<players.length;i++){
         const p = players[i];
         if(!p.alive) continue;
-        const px = p.x, py = p.y;
-        if(bomb.x < px + PLAYER_W && bomb.x + BOMB_SIZE_PX > px &&
-           bomb.y < py + PLAYER_H && bomb.y + BOMB_SIZE_PX > py){
-          // hit player -> that player gets bomb
+        if(bomb.x < p.x + PLAYER_W && bomb.x + (BASE_TILE_PX*0.6) > p.x &&
+           bomb.y < p.y + PLAYER_H && bomb.y + (BASE_TILE_PX*0.6) > p.y){
+          // hit -> attach to player
           p.hasBomb = true;
           bomb = {
-            x: p.x + PLAYER_W/2 - BOMB_SIZE_PX/2,
-            y: p.y + PLAYER_H/2 - BOMB_SIZE_PX/2,
-            vx:0,vy:0,isFlying:false,holderIndex:i,fromIndex:null
+            x: p.x + PLAYER_W/2 - (BASE_TILE_PX*0.6)/2,
+            y: p.y + PLAYER_H/2 - (BASE_TILE_PX*0.6)/2,
+            vx:0, vy:0, isFlying:false, holderIndex:i, fromIndex:null
           };
           break;
         }
@@ -465,174 +476,184 @@ function update(){
     }
   }
 
-  // --- Round timer and explosion handled by timer tick (see startRoundTimer) ---
-
-  // --- Update particles ---
-  for(let i = particles.length-1; i>=0; i--){
+  // --- Particles update ---
+  for(let i=particles.length-1;i>=0;i--){
     const sp = particles[i];
     sp.age++;
     sp.x += sp.vx;
     sp.y += sp.vy;
-    sp.vy += 0.12; // gravity for particles
-    if(sp.age > sp.life) particles.splice(i,1);
+    sp.vy += 0.06; // subtle gravity
+    if(sp.age >= sp.life) particles.splice(i,1);
   }
 
-  // --- Camera: compute target that fits all alive players (in tile units) ---
+  // --- Camera fit to all alive players ---
   const alivePlayers = players.filter(p => p.alive);
   if(alivePlayers.length > 0){
-    let minTx = Infinity, maxTx = -Infinity, minTy = Infinity, maxTy = -Infinity;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     alivePlayers.forEach(p=>{
       const leftTile = (p.x) / BASE_TILE_PX;
       const rightTile = (p.x + PLAYER_W) / BASE_TILE_PX;
       const topTile = (p.y) / BASE_TILE_PX;
       const bottomTile = (p.y + PLAYER_H) / BASE_TILE_PX;
-      minTx = Math.min(minTx, leftTile);
-      maxTx = Math.max(maxTx, rightTile);
-      minTy = Math.min(minTy, topTile);
-      maxTy = Math.max(maxTy, bottomTile);
+      minX = Math.min(minX, leftTile);
+      maxX = Math.max(maxX, rightTile);
+      minY = Math.min(minY, topTile);
+      maxY = Math.max(maxY, bottomTile);
     });
-    // padding in tiles
-    const PAD = 1.2;
-    const boxWidthTiles = (maxTx - minTx) + PAD;
-    const boxHeightTiles = (maxTy - minTy) + PAD;
 
-    const baseTile = canvas.width / MAP_TILES; // max zoom-in (pixels per tile)
-    let targetTileSize = Math.min(canvas.width / boxWidthTiles, canvas.height / boxHeightTiles);
-    if(targetTileSize > baseTile) targetTileSize = baseTile;
+    const PAD = 1.2; // tiles padding
+    const boxWidthTiles = (maxX - minX) + PAD;
+    const boxHeightTiles = (maxY - minY) + PAD;
 
-    // center in tile units
-    const centerTileX = (minTx + maxTx) / 2;
-    const centerTileY = (minTy + maxTy) / 2;
+    const baseTilePixel = canvas.width / MAP_TILES; // max zoom-in
+    let targetTilePixel = Math.min(canvas.width / boxWidthTiles, canvas.height / boxHeightTiles);
+    if(targetTilePixel > baseTilePixel) targetTilePixel = baseTilePixel;
 
-    // smooth lerp camera
-    camTileSize = lerp(camTileSize || baseTile, targetTileSize, CAMERA_SMOOTH);
-    const targetCamX = centerTileX - (canvas.width / (2*camTileSize));
-    const targetCamY = centerTileY - (canvas.height / (2*camTileSize));
+    const centerTileX = (minX + maxX) / 2;
+    const centerTileY = (minY + maxY) / 2;
+
+    camTileSize = lerp(camTileSize, targetTilePixel, CAMERA_SMOOTH);
+    const targetCamX = centerTileX - (canvas.width / (2 * camTileSize));
+    const targetCamY = centerTileY - (canvas.height / (2 * camTileSize));
     camX = lerp(camX, targetCamX, CAMERA_SMOOTH);
     camY = lerp(camY, targetCamY, CAMERA_SMOOTH);
   }
 
-  // --- Draw world using camTileSize (pixels per tile) ---
+  // --- DRAW ---
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // Tiles
+  // tiles
   for(let ty=0; ty<MAP_TILES; ty++){
     for(let tx=0; tx<MAP_TILES; tx++){
       const sx = (tx - camX) * camTileSize;
       const sy = (ty - camY) * camTileSize;
-      // skip tiles outside screen
       if(sx + camTileSize < 0 || sy + camTileSize < 0 || sx > canvas.width || sy > canvas.height) continue;
       const img = (grid[ty][tx] === 1) ? imgWall : imgGround;
       ctx.drawImage(img, sx, sy, camTileSize, camTileSize);
     }
   }
 
-  // Players
-  players.forEach(p=>{
-    if(!p.alive) return;
-    const sx = ((p.x)/BASE_TILE_PX - camX) * camTileSize;
-    const sy = ((p.y)/BASE_TILE_PX - camY) * camTileSize;
+  // draw trails (pixel glowing outline) — older entries first so they fade outward
+  for(let i=0;i<players.length;i++){
+    const tr = trails[i];
+    if(!tr || tr.length===0) continue;
+    const baseColor = playerColors[(i % playerColors.length)];
+    for(let t = tr.length -1; t >= 0; t--){
+      const ent = tr[t];
+      ent.age += 1;
+      const life = tr.length; // treat length as life scale
+      const intensity = ( (life - t) / life ); // 0..1 older -> smaller intensity
+      const alpha = 0.18 * intensity;
+      // draw a pixel outline (multiple small rects around center)
+      const dx = (ent.x / BASE_TILE_PX - camX) * camTileSize;
+      const dy = (ent.y / BASE_TILE_PX - camY) * camTileSize;
+      const s = Math.max(2, camTileSize * 0.18 * intensity);
+      ctx.fillStyle = baseColor + alpha + ')';
+      // offsets (pixel-style outline)
+      const offs = [ [0,0],[-0.04,0],[0.04,0],[0,-0.04],[0,0.04],[-0.08,0],[0.08,0],[0,-0.08],[0,0.08] ];
+      offs.forEach(o=>{
+        ctx.fillRect(dx + o[0]*camTileSize - s/2, dy + o[1]*camTileSize - s/2, s, s);
+      });
+    }
+  }
+
+  // draw players (on top)
+  for(let i=0;i<players.length;i++){
+    const p = players[i];
+    if(!p.alive) continue;
+    const sx = (p.x / BASE_TILE_PX - camX) * camTileSize;
+    const sy = (p.y / BASE_TILE_PX - camY) * camTileSize;
     const drawW = (PLAYER_W / BASE_TILE_PX) * camTileSize;
     const drawH = (PLAYER_H / BASE_TILE_PX) * camTileSize;
     const img = p.hasBomb ? playerImgs['pb'+p.id] : playerImgs['p'+p.id];
     ctx.drawImage(img, sx, sy, drawW, drawH);
-  });
-
-  // Bomb if flying or held by none
-  if(bomb && !bomb.isFlying && bomb.holderIndex != null){
-    // bomb on holder (we draw as part of player's sprite; so skip)
-  } else if(bomb){
-    const sx = ((bomb.x)/BASE_TILE_PX - camX) * camTileSize;
-    const sy = ((bomb.y)/BASE_TILE_PX - camY) * camTileSize;
-    const drawW = (BOMB_SIZE_PX / BASE_TILE_PX) * camTileSize;
-    const drawH = (BOMB_SIZE_PX / BASE_TILE_PX) * camTileSize;
-    ctx.drawImage(imgBomb, sx, sy, drawW, drawH);
   }
 
-  // Particles
-  particles.forEach(p=>{
-    const sx = (p.x / BASE_TILE_PX - camX) * camTileSize;
-    const sy = (p.y / BASE_TILE_PX - camY) * camTileSize;
-    const alpha = 1 - (p.age / p.life);
-    ctx.fillStyle = p.color.replace(/,1\)$/, ',' + alpha + ')');
-    const size = Math.max(1, (camTileSize * 0.06));
+  // draw bomb (if flying or lying on map)
+  if(bomb){
+    if(!bomb.isFlying && bomb.holderIndex !== null && bomb.holderIndex !== undefined){
+      // drawn as part of player's bomb sprite — skip here
+    } else {
+      const bx = (bomb.x / BASE_TILE_PX - camX) * camTileSize;
+      const by = (bomb.y / BASE_TILE_PX - camY) * camTileSize;
+      const bw = ( (BASE_TILE_PX*0.6) / BASE_TILE_PX) * camTileSize;
+      const bh = bw;
+      ctx.drawImage(imgBomb, bx, by, bw, bh);
+    }
+  }
+
+  // particles
+  particles.forEach(sp=>{
+    const sx = (sp.x / BASE_TILE_PX - camX) * camTileSize;
+    const sy = (sp.y / BASE_TILE_PX - camY) * camTileSize;
+    const size = Math.max(1, camTileSize * 0.05);
+    const alpha = 1 - (sp.age / sp.life);
+    ctx.fillStyle = sp.color + alpha + ')';
     ctx.fillRect(sx, sy, size, size);
   });
 
-  // Timer top-left inside canvas (safe margin)
-  ctx.fillStyle = "white";
+  // timer top-left
+  ctx.fillStyle = 'white';
   ctx.font = `${Math.max(12, canvas.width/30)}px 'Press Start 2P'`;
   ctx.textBaseline = 'top';
   ctx.fillText(String(Math.ceil(timeLeft)), 8, 8);
 
-  // update prevKeys (rising-edge detection)
-  for(let k in keys) prevKeys[k] = keys[k];
+  // copy current keys->prevKeys for rising-edge detection
+  for(const k in keys) prevKeys[k] = keys[k];
 
   requestAnimationFrame(update);
 }
 
-/* ---------- Start game ---------- */
-function startGame(){
-  // read and validate time input
-  const val = parseInt(timeInput.value);
-  if(isNaN(val) || val < 5 || val > 60) return;
-  startTime = val;
-  timeLeft = startTime;
+/* -------------- Start / UI wiring -------------- */
+btn2.addEventListener('click', ()=>{ numPlayers = 2; menu.style.display='none'; settings.style.display='flex'; validateStartButton(); });
+btn3.addEventListener('click', ()=>{ numPlayers = 3; menu.style.display='none'; settings.style.display='flex'; validateStartButton(); });
+btn4.addEventListener('click', ()=>{ numPlayers = 4; menu.style.display='none'; settings.style.display='flex'; validateStartButton(); });
 
-  // reset
+function validateStartButton(){
+  const v = parseInt(timeInput.value);
+  if(!isNaN(v) && v >= 5 && v <= 60) startBtn.src = 'images/buttons/start.png';
+  else startBtn.src = 'images/buttons/start-gray.png';
+}
+timeInput.addEventListener('input', validateStartButton);
+
+startBtn.addEventListener('click', ()=>{
+  const v = parseInt(timeInput.value);
+  if(isNaN(v) || v < 5 || v > 60) return;
+  startTime = v; timeLeft = startTime;
   generateMap();
   spawnPlayers();
   giveBomb();
   particles = [];
+  // reset trails
+  trails = players.map(()=>[]);
   running = true;
-  camX = 0; camY = 0; camTileSize = canvas.width / MAP_TILES;
-
-  // start round timer
+  camTileSize = canvas.width / MAP_TILES;
+  camX = camY = 0;
+  // start timer
   stopRoundTimer();
   startRoundTimer();
-
   // UI hide
-  settings.style.display = 'none';
   menu.style.display = 'none';
+  settings.style.display = 'none';
   gameover.style.display = 'none';
-
   // clear prevKeys
   prevKeys = {};
-  // begin update loop
   requestAnimationFrame(update);
-}
+});
 
-/* ---------- Deal with timer-based explosion if needed (already used by timer) ---------- */
-/* handleRoundEndByTimer defined above */
+restartBtn.addEventListener('click', ()=> location.reload() );
 
-/* ---------- Button wiring ---------- */
-btn2.addEventListener('click', ()=>{ numPlayers = 2; menu.style.display='none'; settings.style.display='flex'; startImg.src = 'images/buttons/start-gray.png'; startBtn.src='images/buttons/start-gray.png'; });
-btn3.addEventListener('click', ()=>{ numPlayers = 3; menu.style.display='none'; settings.style.display='flex'; startImg.src = 'images/buttons/start-gray.png'; startBtn.src='images/buttons/start-gray.png'; });
-btn4.addEventListener('click', ()=>{ numPlayers = 4; menu.style.display='none'; settings.style.display='flex'; startImg.src = 'images/buttons/start-gray.png'; startBtn.src='images/buttons/start-gray.png'; });
-
-// Start button visual control
-function validateStartButton(){
-  const v = parseInt(timeInput.value);
-  if(!isNaN(v) && v >=5 && v <= 60){
-    startBtn.src = 'images/buttons/start.png';
-  } else {
-    startBtn.src = 'images/buttons/start-gray.png';
-  }
-}
-timeInput.addEventListener('input', validateStartButton);
-startBtn.addEventListener('click', startGame);
-
-// Restart
-restartBtn.addEventListener('click', ()=> location.reload());
-
-/* ---------- initial UI state ---------- */
+/* initial UI */
 menu.style.display = 'flex';
 settings.style.display = 'none';
 gameover.style.display = 'none';
 validateStartButton();
 
-/* ---------- expose some helpers for debug in console (optional) ---------- */
-window._gp = ()=>({players, bomb, grid, particles});
+/* expose debug values (optional) */
+window._dbg = { players, bomb, particles, grid };
+
+/* ensure pixel rendering */
+ctx.imageSmoothingEnabled = false;
 </script>
 </body>
 </html>
