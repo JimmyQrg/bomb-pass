@@ -167,6 +167,265 @@
     ctx.fillStyle = "#fff";
     ctx.fillText("Game starting...", canvas.width/2 - 100, canvas.height/2);
   }
+<script>
+let game = null;
+
+function startGame() {
+  const TILE_SIZE = 32;
+  const MAP_W = 80, MAP_H = 80;
+  const players = [];
+  const walls = [];
+  const ground = [];
+  const keys = {};
+  const bombImg = new Image();
+  bombImg.src = "images/bomb.png";
+
+  // Load player sprites
+  const playerImgs = [];
+  for (let i = 1; i <= 4; i++) {
+    const normal = new Image();
+    normal.src = `images/players/player-${i}.png`;
+    const bomb = new Image();
+    bomb.src = `images/players/player-${i}-bomb.png`;
+    playerImgs.push({ normal, bomb });
+  }
+
+  const wallImg = new Image();
+  wallImg.src = "images/blocks/wall.png";
+  const groundImg = new Image();
+  groundImg.src = "images/blocks/ground-slab.png";
+
+  // Key bindings
+  const controls = [
+    { up:'w', down:'s', left:'a', right:'d', throw:'q' },
+    { up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight', throw:'/' },
+    { up:'i', down:'k', left:'j', right:'l', throw:'y' },
+    { up:'t', down:'g', left:'f', right:'h', throw:'r' }
+  ];
+
+  // Build organic maze
+  const map = Array(MAP_H).fill().map(()=>Array(MAP_W).fill(0));
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      map[y][x]=0;
+    }
+  }
+
+  // generate rectangular wall clusters
+  const clusters = 40;
+  for(let c=0;c<clusters;c++){
+    const w = 3+Math.floor(Math.random()*8);
+    const h = 3+Math.floor(Math.random()*8);
+    const sx = Math.floor(Math.random()*(MAP_W-w-1));
+    const sy = Math.floor(Math.random()*(MAP_H-h-1));
+    for(let y=sy;y<sy+h;y++){
+      for(let x=sx;x<sx+w;x++){
+        if(x>=0&&y>=0&&x<MAP_W&&y<MAP_H){
+          map[y][x]=1;
+        }
+      }
+    }
+  }
+
+  // carve roads 3 blocks wide
+  for(let y=3;y<MAP_H;y+=6){
+    for(let x=0;x<MAP_W;x++){
+      for(let dy=-1;dy<=1;dy++){
+        if(map[y+dy]) map[y+dy][x]=0;
+      }
+    }
+  }
+  for(let x=3;x<MAP_W;x+=6){
+    for(let y=0;y<MAP_H;y++){
+      for(let dx=-1;dx<=1;dx++){
+        if(map[y] && map[y][x+dx]!==undefined) map[y][x+dx]=0;
+      }
+    }
+  }
+
+  // Build wall/ground objects
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      const img = map[y][x]===1?wallImg:groundImg;
+      (map[y][x]===1?walls:ground).push({x,y,img});
+    }
+  }
+
+  // spawn players
+  const spawnPositions = [
+    {x:2,y:2},{x:MAP_W-3,y:2},{x:2,y:MAP_H-3},{x:MAP_W-3,y:MAP_H-3}
+  ];
+  for(let i=0;i<playerCount;i++){
+    let {x,y}=spawnPositions[i];
+    // teleport out of wall if needed
+    while(map[y][x]===1){
+      x=Math.floor(Math.random()*MAP_W);
+      y=Math.floor(Math.random()*MAP_H);
+    }
+    players.push({
+      id:i,
+      x:x*TILE_SIZE,
+      y:y*TILE_SIZE,
+      w:TILE_SIZE,
+      h:TILE_SIZE,
+      speed:2,
+      hasBomb:false,
+      alive:true
+    });
+  }
+
+  // assign bomb to random player
+  let bomb = {
+    x:players[0].x, y:players[0].y, size:20,
+    vx:0, vy:0, owner:0, flying:false, timer:timeLimit
+  };
+  players[bomb.owner].hasBomb=true;
+
+  // camera
+  let cam = {x:0,y:0,zoom:1};
+
+  // input
+  window.onkeydown=e=>keys[e.key]=true;
+  window.onkeyup=e=>keys[e.key]=false;
+
+  // main loop
+  const FPS=60;
+  let elapsed=0;
+  const tick=1000/FPS;
+  const startTime=Date.now();
+
+  function update(){
+    const now=Date.now();
+    elapsed=(now-startTime)/1000;
+    if(elapsed>bomb.timer){
+      // explode
+      players[bomb.owner].alive=false;
+      endGame();
+      return;
+    }
+
+    // player movement
+    for(let i=0;i<playerCount;i++){
+      const p=players[i];
+      if(!p.alive) continue;
+      const c=controls[i];
+      let vx=0,vy=0;
+      if(keys[c.up])vy=-1;
+      if(keys[c.down])vy=1;
+      if(keys[c.left])vx=-1;
+      if(keys[c.right])vx=1;
+      const spd=p.hasBomb?3:2;
+      const nx=p.x+vx*spd;
+      const ny=p.y+vy*spd;
+
+      // collision with walls
+      if(!isCollide(nx, p.y, p))p.x=nx;
+      if(!isCollide(p.x, ny, p))p.y=ny;
+
+      // throw
+      if(keys[c.throw] && p.hasBomb && !bomb.flying){
+        const dir={x:vx,y:vy};
+        if(dir.x!==0||dir.y!==0){
+          bomb.flying=true;
+          bomb.vx=dir.x*6;
+          bomb.vy=dir.y*6;
+          p.hasBomb=false;
+        }
+      }
+    }
+
+    // bomb flight
+    if(bomb.flying){
+      bomb.x+=bomb.vx;
+      bomb.y+=bomb.vy;
+      // hit wall?
+      const tx=Math.floor(bomb.x/TILE_SIZE);
+      const ty=Math.floor(bomb.y/TILE_SIZE);
+      if(map[ty] && map[ty][tx]===1){
+        // return to owner
+        bomb.flying=false;
+        bomb.vx=bomb.vy=0;
+        players[bomb.owner].hasBomb=true;
+      }
+      // hit player
+      for(const p of players){
+        if(p.alive && !p.hasBomb && Math.abs(p.x-bomb.x)<20 && Math.abs(p.y-bomb.y)<20){
+          bomb.flying=false;
+          bomb.vx=bomb.vy=0;
+          bomb.owner=p.id;
+          p.hasBomb=true;
+        }
+      }
+    } else {
+      bomb.x=players[bomb.owner].x;
+      bomb.y=players[bomb.owner].y;
+    }
+
+    // camera follow all
+    updateCamera();
+
+    draw();
+    requestAnimationFrame(update);
+  }
+
+  function updateCamera(){
+    // center around players
+    const xs=players.filter(p=>p.alive).map(p=>p.x);
+    const ys=players.filter(p=>p.alive).map(p=>p.y);
+    const minx=Math.min(...xs),maxx=Math.max(...xs);
+    const miny=Math.min(...ys),maxy=Math.max(...ys);
+    const cx=(minx+maxx)/2;
+    const cy=(miny+maxy)/2;
+    const dx=maxx-minx, dy=maxy-miny;
+    const dist=Math.max(dx,dy);
+    cam.zoom=Math.max(0.8,Math.min(1.6,400/(dist+200)));
+    cam.x=cx - canvas.width/(2*cam.zoom);
+    cam.y=cy - canvas.height/(2*cam.zoom);
+    // lock inside map
+    cam.x=Math.max(0,Math.min(cam.x,MAP_W*TILE_SIZE-canvas.width/cam.zoom));
+    cam.y=Math.max(0,Math.min(cam.y,MAP_H*TILE_SIZE-canvas.height/cam.zoom));
+  }
+
+  function isCollide(nx,ny,p){
+    const gx=Math.floor(nx/TILE_SIZE);
+    const gy=Math.floor(ny/TILE_SIZE);
+    for(let dy=0;dy<1;dy++){
+      for(let dx=0;dx<1;dx++){
+        if(map[gy+dy] && map[gy+dy][gx+dx]===1) return true;
+      }
+    }
+    return false;
+  }
+
+  function draw(){
+    ctx.save();
+    ctx.setTransform(cam.zoom,0,0,cam.zoom,-cam.x*cam.zoom,-cam.y*cam.zoom);
+    ctx.clearRect(0,0,canvas.width/cam.zoom,canvas.height/cam.zoom);
+    for(const g of ground){ctx.drawImage(g.img,g.x*TILE_SIZE,g.y*TILE_SIZE,TILE_SIZE,TILE_SIZE);}
+    for(const w of walls){ctx.drawImage(w.img,w.x*TILE_SIZE,w.y*TILE_SIZE,TILE_SIZE,TILE_SIZE);}
+    for(const p of players){
+      if(!p.alive) continue;
+      const img=p.hasBomb?playerImgs[p.id].bomb:playerImgs[p.id].normal;
+      ctx.drawImage(img,p.x,p.y,p.w,p.h);
+    }
+    ctx.drawImage(bombImg,bomb.x,bomb.y,bomb.size,bomb.size);
+    ctx.restore();
+
+    // draw timer
+    ctx.fillStyle="white";
+    ctx.font="12px 'Press Start 2P'";
+    ctx.fillText("TIME: "+Math.max(0,(bomb.timer-elapsed)).toFixed(1),20,20);
+  }
+
+  function endGame(){
+    ctx.fillStyle="red";
+    ctx.font="20px 'Press Start 2P'";
+    ctx.fillText("BOOM!",canvas.width/2-60,canvas.height/2);
+  }
+
+  update();
+}
+
 </script>
 </body>
 </html>
