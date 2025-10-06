@@ -1,273 +1,172 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Bomb Pass</title>
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: black;
-      font-family: 'Press Start 2P', cursive;
-      color: white;
-    }
-    canvas {
-      display: block;
-      margin: auto;
-      image-rendering: pixelated;
-    }
-    #ui {
-      position: absolute;
-      top: 10px;
-      width: 100%;
-      text-align: center;
-      font-size: 14px;
-    }
-    .btn {
-      font-family: 'Press Start 2P', cursive;
-      background: #222;
-      color: #fff;
-      border: 2px solid #fff;
-      padding: 6px 10px;
-      margin: 2px;
-      cursor: pointer;
-    }
-    #playerSelect {
-      position: absolute;
-      top: 30%;
-      width: 100%;
-      text-align: center;
-    }
-    #playerSelect h1 {
-      font-size: 20px;
-      margin-bottom: 20px;
-    }
-    #timeSelect {
-      position: absolute;
-      bottom: 20px;
-      width: 100%;
-      text-align: center;
-      font-size: 12px;
-    }
-    input[type=number] {
-      width: 80px;
-      font-family: 'Press Start 2P';
-      font-size: 12px;
-      text-align: center;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bomb Pass</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #000;
+    font-family: 'Press Start 2P', cursive;
+  }
+
+  canvas {
+    display: block;
+    margin: 0 auto;
+    image-rendering: pixelated;
+  }
+
+  #background {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    background: url("images/background.png") no-repeat center center;
+    background-size: cover;
+    z-index: 0;
+  }
+
+  .menu, .settings {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 2;
+  }
+
+  h1 {
+    color: #fff;
+    font-size: 18px;
+    margin-bottom: 40px;
+    text-shadow: 2px 2px #000;
+  }
+
+  .menu button, .settings button {
+    display: block;
+    margin: 10px auto;
+    border: none;
+    background: none;
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+
+  .menu button img, .settings button img {
+    width: 180px;
+  }
+
+  .menu button:hover img {
+    filter: brightness(1.2);
+  }
+
+  .menu button:active img {
+    transform: scale(0.95);
+  }
+
+  .settings input {
+    display: block;
+    margin: 20px auto;
+    padding: 8px;
+    text-align: center;
+    width: 120px;
+    font-size: 12px;
+    border: 2px solid #fff;
+    background: #222;
+    color: #fff;
+  }
+
+  #error {
+    color: red;
+    font-size: 10px;
+    display: none;
+  }
+
+  #gameCanvas {
+    display: none;
+  }
+</style>
 </head>
+
 <body>
-<div id="ui"></div>
+  <div id="background"></div>
 
-<div id="playerSelect">
-  <h1>BOMB PASS</h1>
-  <p>Select number of players:</p>
-  <button class="btn" onclick="startGame(2)">2</button>
-  <button class="btn" onclick="startGame(3)">3</button>
-  <button class="btn" onclick="startGame(4)">4</button>
-  <div id="timeSelect">
-    <p>Set round time (5s–60s):</p>
-    <input id="timeInput" type="number" value="20" min="5" max="60"> seconds
+  <div id="menu" class="menu">
+    <h1>BOMB PASS</h1>
+    <button id="btn2"><img src="images/buttons/start-menu/button-2-players.png"></button>
+    <button id="btn3"><img src="images/buttons/start-menu/button-3-players.png"></button>
+    <button id="btn4"><img src="images/buttons/start-menu/button-4-players.png"></button>
   </div>
-</div>
 
-<canvas id="game" width="800" height="600"></canvas>
+  <div id="settings" class="settings" style="display:none;">
+    <h1>SET GAME TIME</h1>
+    <input id="timeInput" type="number" placeholder="5–60 sec" min="5" max="60">
+    <p id="error">Please enter a value between 5 and 60</p>
+    <button id="startBtn">
+      <img id="startImg" src="images/buttons/start-gray.png">
+    </button>
+  </div>
+
+  <canvas id="gameCanvas" width="1280" height="720"></canvas>
 
 <script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+  const menu = document.getElementById("menu");
+  const settings = document.getElementById("settings");
+  const startBtn = document.getElementById("startBtn");
+  const startImg = document.getElementById("startImg");
+  const timeInput = document.getElementById("timeInput");
+  const error = document.getElementById("error");
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
 
-let players = [];
-let bombs = [];
-let explosions = [];
-let gameRunning = false;
-let roundTime = 20;
-let camera = { x:0, y:0, width:canvas.width, height:canvas.height };
-let mapSize = 2000;
+  let playerCount = 2;
+  let timeLimit = 0;
 
-class Player {
-  constructor(x, y, color, keys, throwKey) {
-    this.x = x;
-    this.y = y;
-    this.color = color;
-    this.keys = keys;
-    this.throwKey = throwKey;
-    this.width = 20;
-    this.height = 20;
-    this.speed = 3;
-    this.hasBomb = false;
-    this.trail = [];
-    this.alive = true;
+  // Handle player select buttons
+  document.getElementById("btn2").onclick = () => selectPlayers(2);
+  document.getElementById("btn3").onclick = () => selectPlayers(3);
+  document.getElementById("btn4").onclick = () => selectPlayers(4);
+
+  function selectPlayers(count) {
+    playerCount = count;
+    menu.style.display = "none";
+    settings.style.display = "block";
   }
-  update() {
-    if(!this.alive) return;
-    let vx=0, vy=0;
-    if(keys[this.keys.left]) vx=-1;
-    if(keys[this.keys.right]) vx=1;
-    if(keys[this.keys.up]) vy=-1;
-    if(keys[this.keys.down]) vy=1;
-    if(this.hasBomb) {
-      this.speed = 4.2; // faster with bomb
+
+  // Validate time input
+  timeInput.addEventListener("input", () => {
+    const val = parseInt(timeInput.value);
+    if (val >= 5 && val <= 60) {
+      startImg.src = "images/buttons/start.png";
+      startBtn.disabled = false;
+      error.style.display = "none";
     } else {
-      this.speed = 3;
+      startImg.src = "images/buttons/start-gray.png";
+      startBtn.disabled = true;
+      error.style.display = "block";
     }
-    this.x += vx*this.speed;
-    this.y += vy*this.speed;
+  });
 
-    // Keep inside map
-    this.x = Math.max(0, Math.min(mapSize-this.width, this.x));
-    this.y = Math.max(0, Math.min(mapSize-this.height, this.y));
+  // Handle start
+  startBtn.onclick = () => {
+    if (startBtn.disabled) return;
+    timeLimit = parseInt(timeInput.value);
+    settings.style.display = "none";
+    document.getElementById("background").style.display = "none";
+    canvas.style.display = "block";
+    startGame();
+  };
 
-    // Trail
-    this.trail.push({x:this.x,y:this.y});
-    if(this.trail.length>15) this.trail.shift();
-
-    // Throw
-    if(keys[this.throwKey]) {
-      this.throwBomb();
-      keys[this.throwKey] = false;
-    }
+  // Placeholder for next part
+  function startGame() {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#fff";
+    ctx.fillText("Game starting...", canvas.width/2 - 100, canvas.height/2);
   }
-  throwBomb() {
-    if(this.hasBomb) {
-      bombs.push(new Bomb(this.x,this.y, this));
-      this.hasBomb=false;
-    }
-  }
-  draw() {
-    if(!this.alive) return;
-    // Trail glow
-    for(let i=0;i<this.trail.length;i++) {
-      let t=this.trail[i];
-      ctx.fillStyle=`rgba(255,255,255,${i/this.trail.length})`;
-      ctx.fillRect(t.x-camera.x, t.y-camera.y, this.width, this.height);
-    }
-    ctx.fillStyle=this.color;
-    ctx.fillRect(this.x-camera.x,this.y-camera.y,this.width,this.height);
-    if(this.hasBomb) {
-      ctx.strokeStyle="yellow";
-      ctx.lineWidth=2;
-      ctx.strokeRect(this.x-camera.x,this.y-camera.y,this.width,this.height);
-    }
-  }
-}
-
-class Bomb {
-  constructor(x,y,owner) {
-    this.x=x;
-    this.y=y;
-    this.owner=owner;
-    this.size=10;
-    this.vx=(Math.random()-0.5)*6;
-    this.vy=(Math.random()-0.5)*6;
-    this.active=true;
-  }
-  update() {
-    this.x+=this.vx;
-    this.y+=this.vy;
-    if(this.x<0||this.x>mapSize||this.y<0||this.y>mapSize) {
-      this.explode();
-      this.active=false;
-    }
-    // collision
-    for(let p of players){
-      if(p.alive && !p.hasBomb && this.active &&
-        this.x>p.x && this.x<p.x+p.width &&
-        this.y>p.y && this.y<p.y+p.height){
-        p.hasBomb=true;
-        this.active=false;
-      }
-    }
-  }
-  explode() {
-    for(let i=0;i<20;i++) {
-      explosions.push(new Particle(this.x,this.y));
-    }
-  }
-  draw() {
-    if(!this.active) return;
-    ctx.fillStyle="orange";
-    ctx.fillRect(this.x-camera.x,this.y-camera.y,this.size,this.size);
-  }
-}
-
-class Particle {
-  constructor(x,y) {
-    this.x=x;
-    this.y=y;
-    this.vx=(Math.random()-0.5)*8;
-    this.vy=(Math.random()-0.5)*8;
-    this.life=30;
-  }
-  update() {
-    this.x+=this.vx;
-    this.y+=this.vy;
-    this.life--;
-  }
-  draw() {
-    ctx.fillStyle=`rgba(255,200,0,${this.life/30})`;
-    ctx.fillRect(this.x-camera.x,this.y-camera.y,4,4);
-  }
-}
-
-let keys={};
-window.addEventListener("keydown",e=>keys[e.key]=true);
-window.addEventListener("keyup",e=>keys[e.key]=false);
-
-function startGame(n) {
-  roundTime = Math.min(60, Math.max(5, parseInt(document.getElementById("timeInput").value)||20));
-  document.getElementById("playerSelect").style.display="none";
-  gameRunning=true;
-  players=[];
-  let startPos=[
-    [100,100],[mapSize-120,100],[100,mapSize-120],[mapSize-120,mapSize-120]
-  ];
-  let colors=["red","blue","green","purple"];
-  let keysets=[
-    {up:"w",down:"s",left:"a",right:"d"},
-    {up:"ArrowUp",down:"ArrowDown",left:"ArrowLeft",right:"ArrowRight"},
-    {up:"i",down:"k",left:"j",right:"l"},
-    {up:"t",down:"g",left:"f",right:"h"},
-  ];
-  let throws=["q","/","y","r"];
-  for(let i=0;i<n;i++){
-    players.push(new Player(startPos[i][0],startPos[i][1],colors[i],keysets[i],throws[i]));
-  }
-  players[0].hasBomb=true;
-  loop();
-}
-
-function updateCamera() {
-  // follow first alive player
-  let p=players.find(pl=>pl.alive);
-  if(!p) return;
-  camera.x=p.x-canvas.width/2;
-  camera.y=p.y-canvas.height/2;
-  camera.x=Math.max(0,Math.min(mapSize-canvas.width,camera.x));
-  camera.y=Math.max(0,Math.min(mapSize-canvas.height,camera.y));
-}
-
-function loop() {
-  if(!gameRunning) return;
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  // Background
-  ctx.fillStyle="#111";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-  // Update
-  players.forEach(p=>p.update());
-  bombs.forEach(b=>b.update());
-  explosions.forEach(ex=>ex.update());
-  bombs=bombs.filter(b=>b.active);
-  explosions=explosions.filter(ex=>ex.life>0);
-  updateCamera();
-  // Draw
-  players.forEach(p=>p.draw());
-  bombs.forEach(b=>b.draw());
-  explosions.forEach(ex=>ex.draw());
-  requestAnimationFrame(loop);
-}
 </script>
 </body>
 </html>
