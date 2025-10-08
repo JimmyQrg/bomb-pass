@@ -11,35 +11,35 @@ canvas{display:block;margin:0 auto;}
 .ui{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:url("images/background.png") center/cover no-repeat;}
 .btn{image-rendering:pixelated;cursor:pointer;transition:transform .1s;margin:5px;}
 .btn:active{transform:scale(0.9);}
-.title{color:white;text-shadow:2px 2px black;font-size:24px;margin-bottom:20px;text-align:center;}
-.input-row{color:white;margin:10px;font-size:12px;}
-input{font-family:"Press Start 2P";font-size:12px;width:80px;text-align:center;}
-.timer{position:absolute;top:20px;left:50%;transform:translateX(-50%);color:white;font-size:16px;text-shadow:2px 2px black;}
+.title{color:white;text-shadow:2px 2px black;font-size:32px;margin-bottom:20px;text-align:center;}
+.input-row{color:white;margin:10px;font-size:14px;}
+input{font-family:"Press Start 2P";font-size:14px;width:100px;text-align:center;}
+.timer{position:absolute;top:20px;left:50%;transform:translateX(-50%);color:white;font-size:18px;text-shadow:2px 2px black;}
 .restart{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);cursor:pointer;}
 </style>
 </head>
 <body>
 <div id="menu" class="ui">
   <div class="title">BOMB PASS</div>
-  <img id="b2" class="btn" src="images/buttons/start-menu/button-2-players.png" style="width:80px;">
-  <img id="b3" class="btn" src="images/buttons/start-menu/button-3-players.png" style="width:80px;">
-  <img id="b4" class="btn" src="images/buttons/start-menu/button-4-players.png" style="width:80px;">
+  <img id="b2" class="btn" src="images/buttons/start-menu/button-2-players.png" style="width:120px;">
+  <img id="b3" class="btn" src="images/buttons/start-menu/button-3-players.png" style="width:120px;">
+  <img id="b4" class="btn" src="images/buttons/start-menu/button-4-players.png" style="width:120px;">
 </div>
 
 <div id="settings" class="ui" style="display:none;">
   <div class="title">GAME SETTINGS</div>
   <div class="input-row">Time (5–60s): <input id="timeInput" type="number" value="10" min="5" max="60"/></div>
-  <img id="startBtn" class="btn" src="images/buttons/start-gray.png" style="width:100px;margin-top:20px;">
+  <img id="startBtn" class="btn" src="images/buttons/start-gray.png" style="width:150px;margin-top:20px;">
 </div>
 
 <canvas id="game"></canvas>
 <div id="timer" class="timer" style="display:none;">0</div>
-<img id="restart" class="restart" src="images/buttons/restart.png" style="width:80px;display:none;">
+<img id="restart" class="restart" src="images/buttons/restart.png" style="width:120px;display:none;">
 
 <script>
 const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
 canvas.width=window.innerWidth;canvas.height=window.innerHeight;
-let TILE=32,MAP=500,map=[],players=[],bomb=null,gameState="menu",cam={x:0,y:0,zoom:1};
+let TILE=16,MAP=500,map=[],players=[],bomb=null,gameState="menu",cam={x:0,y:0,zoom:1};
 const assets={},keys={};
 const playerCountDefault=2;
 const ctrls=[{u:"w",d:"s",l:"a",r:"d",t:"q"},{u:"ArrowUp",d:"ArrowDown",l:"ArrowLeft",r:"ArrowRight",t:"/"},{u:"i",d:"k",l:"j",r:"l",t:"y"},{u:"t",d:"g",l:"f",r:"h",t:"r"}];
@@ -76,8 +76,8 @@ function initMap(){
  // Outer walls
  for(let x=0;x<MAP;x++){map[0][x]=1;map[MAP-1][x]=1;}
  for(let y=0;y<MAP;y++){map[y][0]=1;map[y][MAP-1]=1;}
- // Random rectangular wall patches
- for(let i=0;i<50;i++){
+ // Denser wall patches
+ for(let i=0;i<200;i++){
   const size=3+Math.floor(Math.random()*8);
   const x0=1+Math.floor(Math.random()*(MAP-size-1));
   const y0=1+Math.floor(Math.random()*(MAP-size-1));
@@ -85,7 +85,7 @@ function initMap(){
  }
 }
 function findSpawn(){while(true){const x=5+Math.floor(Math.random()*(MAP-10));const y=5+Math.floor(Math.random()*(MAP-10));if(map[y][x]===0)return {x,y};}}
-function initPlayers(){players=[];const color=["red","blue","green","yellow"];for(let i=0;i<playerCount;i++){const s=findSpawn();players.push({x:s.x*TILE,y:s.y*TILE,speed:5,color:color[i],alive:true,ctrl:ctrls[i],hasBomb:false,img:assets["p"+(i+1)],id:i,trail:[]});}}
+function initPlayers(){players=[];const color=["red","blue","green","yellow"];for(let i=0;i<playerCount;i++){const s=findSpawn();players.push({x:s.x*TILE,y:s.y*TILE,speed:6,color:color[i],alive:true,ctrl:ctrls[i],hasBomb:false,img:assets["p"+(i+1)],id:i,trail:[]});}}
 function assignBomb(){const r=Math.floor(Math.random()*playerCount);players[r].hasBomb=true;bomb={x:players[r].x,y:players[r].y,vx:0,vy:0,owner:r};}
 
 function drawMap(){
@@ -97,7 +97,7 @@ function drawMap(){
 function collide(x,y){const gx=Math.floor(x/TILE),gy=Math.floor(y/TILE);return map[gy]&&map[gy][gx]===1;}
 
 let bombThrowing=false;
-function throwBomb(p){bombThrowing=true;bomb.x=p.x;bomb.y=p.y;bomb.vx=(keys[p.ctrl.r]?1:keys[p.ctrl.l]?-1:0)*12;bomb.vy=(keys[p.ctrl.d]?1:keys[p.ctrl.u]?-1:0)*12;p.hasBomb=false;}
+function throwBomb(p){bombThrowing=true;bomb.x=p.x;bomb.y=p.y;bomb.vx=(keys[p.ctrl.r]?1:keys[p.ctrl.l]?-1:0)*15;bomb.vy=(keys[p.ctrl.d]?1:keys[p.ctrl.u]?-1:0)*15;p.hasBomb=false;}
 
 function explode(){const h=players.find(p=>p.hasBomb);if(h)h.alive=false;bomb=null;gameState="end";document.getElementById("restart").style.display="block";}
 
@@ -109,7 +109,7 @@ function update(){
  for(const p of players){if(!p.alive)continue;
   let dx=0,dy=0;if(keys[p.ctrl.u])dy-=p.speed;if(keys[p.ctrl.d])dy+=p.speed;if(keys[p.ctrl.l])dx-=p.speed;if(keys[p.ctrl.r])dx+=p.speed;
   if(!collide(p.x+dx,p.y))p.x+=dx;if(!collide(p.x,p.y+dy))p.y+=dy;
-  if(p.hasBomb)p.speed=6;else p.speed=5;
+  if(p.hasBomb)p.speed=8;else p.speed=6;
   if(keys[p.ctrl.t]&&p.hasBomb&&!bombThrowing)throwBomb(p);
   p.trail.push({x:p.x,y:p.y});if(p.trail.length>10)p.trail.shift();
  }
@@ -127,7 +127,7 @@ function updateCamera(){
  const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
  cam.x+=(cx-cam.x)*0.05;cam.y+=(cy-cam.y)*0.05;
  const dist=Math.max(maxX-minX,maxY-minY);
- const targetZoom=Math.max(0.5,Math.min(2,1200/(dist+400)));
+ const targetZoom=Math.min(3,1200/(dist+200)); // more zoom in
  cam.zoom+=(targetZoom-cam.zoom)*0.05;
  const maxXpos=MAP*TILE-canvas.width/cam.zoom,maxYpos=MAP*TILE-canvas.height/cam.zoom;
  cam.x=Math.max(0,Math.min(cam.x,maxXpos));cam.y=Math.max(0,Math.min(cam.y,maxYpos));
@@ -138,7 +138,6 @@ function render(){
  ctx.save();ctx.scale(cam.zoom,cam.zoom);ctx.translate(-cam.x,-cam.y);
  drawMap();
  for(const p of players){if(!p.alive)continue;
-  // Draw trail
   for(let i=0;i<p.trail.length;i++){ctx.globalAlpha=i/p.trail.length;ctx.drawImage(p.hasBomb?assets["pb"+(p.id+1)]:assets["p"+(p.id+1)],p.trail[i].x-16,p.trail[i].y-16,32,32);}
   ctx.globalAlpha=1;ctx.drawImage(p.hasBomb?assets["pb"+(p.id+1)]:assets["p"+(p.id+1)],p.x-16,p.y-16,32,32);}
  if(bomb)ctx.drawImage(assets.bomb,bomb.x-16,bomb.y-16,32,32);
